@@ -92,3 +92,9 @@ dist/Neos75-Fullscreen.exe        主程序
 主程序通过环境变量 `NEOS75_RENDER` 把它交给 `dashboard/push.js` 和 `dashboard/selftest.js`，两者看到该变量就直接调 exe（命令行与脚本版完全一致），否则退回「python + 脚本」。因此**源码运行和打包运行走的是同一份 render.py**，不存在两套渲染逻辑。`desktop/dash_bridge.py` 的 `_render_command()` 与 `_renderer()` 就是这条分叉点，`tests/test_dashboard.py` 的 `RendererCommand` 类把两种模式都钉住了。
 
 `render.py` 的 `_here()` 负责在冻结后找到 `widgets.json`：冻结时 `__file__` 指向临时解包目录，注册表跟着数据文件在 `sys._MEIPASS` 下，因此回退顺序是 `_MEIPASS/dashboard` → `_MEIPASS` → 脚本同目录。
+
+### 本地验证打包版时的两个坑
+
+**别在受限目录或含非 ASCII 字符的路径下直接跑。** PyInstaller 的 onefile 引导要先在系统临时目录里解包；如果 exe 所在的目录树不允许当前用户建子目录（例如被 ACL 显式拒绝），引导会**静默挂住** —— 进程 CPU 恒为 0，没有任何输出，连参数错误的调用都不返回。把 exe 复制到 `C:\tmp` 一类干净路径即可正常。`desktop/ci_smoke.py` 已经处理了这一点：检测到非 ASCII 路径会先复制到系统临时目录再测，并打印说明。
+
+**PyInstaller 引导不认 bash 风格的 `TEMP=/tmp`。** 在 MSYS/Git-Bash 里直接运行会报 `[PYI-NNNN:ERROR] Could not create temporary directory!`，退出码 4294967295。这是本地 shell 环境的路径格式问题，不是程序缺陷；用 `env TEMP="C:\Users\<你>\AppData\Local\Temp" TMP="<同>"` 覆盖即可。

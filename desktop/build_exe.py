@@ -63,7 +63,7 @@ def main():
     # 随包渲染器：桌面版渲染屏幕部件时用它，不依赖目标机器的 Python/Pillow
     renderer=build_renderer(node,a.dist,a.work)
     datas.append((str(renderer),'runtime'))
-    for folder in ['tools','wallpaper','firmware','examples','docs','dashboard','node_modules']:
+    for folder in ['tools','wallpaper','firmware','examples','docs','dashboard','desktop','node_modules']:
         # Explicit allowlist: never collect the repo root, local backups, or build products.
         for f in sorted((ROOT/folder).rglob('*')):
             if not f.is_file() or '__pycache__' in f.parts:continue
@@ -71,6 +71,7 @@ def main():
                 prebuild=f.parts[f.parts.index('prebuilds')+1]
                 if prebuild!=f'HID-{sys.platform}-{node_arch}':continue
             if folder=='dashboard' and '.history' in f.parts:continue  # 采样历史是运行时产物
+            if folder=='desktop' and f.suffix=='.py' and f.name!='dash_bridge.py':continue  # 只带桥接层，不带构建脚本
             if folder!='node_modules' and (f.suffix in ['.bin','.pyc'] or f.name.endswith('.rollback.json')):continue
             dest=Path('project')/f.relative_to(ROOT).parent
             datas.append((str(f),dest.as_posix()))

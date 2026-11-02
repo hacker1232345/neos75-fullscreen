@@ -33,6 +33,10 @@
 
 **打包版不能假设目标机器有 Python 和 Pillow。** 主程序、`push.js`、`selftest.js` 三处都会调 `render.py`，如果都靠「目标机器的 python」，那么打包就等于没打。解法是把 `dashboard/render.py` 单独冻结成 `runtime/Neos75-Render.exe`（自带解释器和 Pillow），由 `NEOS75_RENDER` 环境变量传给下游；源码运行时该变量为空，走原来的「python + 脚本」。**两条路径共用同一份 render.py**，不存在两套渲染逻辑。冻结后 `__file__` 落在临时解包目录，所以 `render.py` 的 `_here()` 要按 `_MEIPASS/dashboard` → `_MEIPASS` → 脚本同目录 回退着找 `widgets.json`。
 
+**打包版缺 `desktop/dash_bridge.py`，屏幕部件页会整块消失。** 白名单补 `dashboard/` 之后，`desktop/` 仍不在里面 —— 但 `app.py` 是靠 `importlib` 从 `PROJECT/desktop/dash_bridge.py` 动态加载桥接层的，缺了它 `dash()` 直接抛异常，`board_selftest`/`board_registry` 两项变成 `SKIP`，界面上的「屏幕部件」页也读不到注册表。修法是把 `desktop` 也加进白名单，但**只带 `dash_bridge.py`**（构建脚本 `build_exe.py`/`ci_smoke.py` 不需要进包）。这个错误只有真正跑打包版的自检才会暴露 —— 源码模式一切正常。
+
+**PyInstaller onefile 引导在受限目录里会静默卡死。** 打包版 `--self-test` 在本机工作区里永远不返回、CPU 恒为 0、连 `--badflag` 这种应立即报错的调用都挂住。逐步 bisect 的结论是：把同一个 exe 复制到 `D:\文档\deepseek-harness` 及以上层级、或 `C:\tmp`、`D:\tmp` 都能秒出结果；只要放进 `default-workspace` 及其任何子目录就必挂。长度不是原因（同长度纯字母名、长 ASCII 深路径都正常），内容也不是（含中文的 `D:\中文测试` 正常），而是**那棵目录树的 ACL**：`default-workspace` 上有一条 `Everyone: Deny DeleteSubdirectoriesAndFiles`，onefile 引导建临时目录时被这条拒绝掉，就停在那里不报错也不退出。这是本机工作区的环境限制，不是程序缺陷 —— CI 的 runner 路径是干净的 ASCII。`ci_smoke.py` 现在遇到非 ASCII 路径会先把 exe 复制到系统临时目录再测，并把这件事打印出来，避免下次再把环境问题误判成程序问题。
+
 ## 留下的债
 
 - `full` 预设下 CPU/内存大数字顶部被裁（7行缩放后卡片高度不足），未修。
@@ -53,6 +57,8 @@
 | 采样拖慢推送周期 | CPU 高负载或 WMI 变慢 | 实际刷新变慢，用户以为卡住 | 每轮 JSON 里的「采样ms」变大 | 每轮打印采样/渲染/推送/周期四项耗时；重项按相位分摊缓存 |
 | 温度永远读不到被误当成bug | 机器不支持热区WMI | 用户以为程序坏了 | 界面上温度恒定 `n/a` | 文档明示数据源与限制，不填假数据 |
 | 为只读操作进DFU白等180秒 | 误加 `--kick` 或旧脚本仍在用 | 浪费时间，屏幕不显示画面 | 命令提示「不在DFU」后卡住 | 只读操作默认不 kick；刷写流程内复用已接管会话免费回验 |
+| 打包版缺桥接层导致部件页消失 | 白名单未收 `desktop/dash_bridge.py` | 屏幕部件页整块不可用，自检两项变 SKIP | 自检里 `board_*` 显示 `SKIP`，界面读不到注册表 | 白名单收 `desktop/` 且只带 `dash_bridge.py`；打包版自检必须真正跑一遍 |
+| 打包版在受限/非 ASCII 目录下卡死 | 目录 ACL 禁止建子目录，或路径含非 ASCII 字符 | 引导阶段静默挂住，连参数错误都不报 | 进程 CPU 恒 0、无任何输出、无结果文件 | `ci_smoke.py` 检测到非 ASCII 路径就先复制到系统临时目录再测并打印原因；本地验证放到 `C:\tmp` 一类干净路径 |
 | 尾段现场数据被当成固件写回 | 刷写工具误把设置区列入待写扇区 | 用户设置回滚成旧值 | 刷后设置变化、该扇区字节数异常 | `screen_mcu.js` 内 `KEEP_SECTORS` 硬保护该扇区，永不列入待写 |
 | 打包版找不到部件注册表 | 冻结后 `widgets.json` 未随数据文件打包 | 屏幕部件页空白、下拉无内容 | 界面提示「部件注册表读取失败」 | `render.py` 的 `_here()` 按 `_MEIPASS/dashboard` 回退；`FrozenRenderer` 三个用例覆盖有/无注册表两种情况 |
 | 打包版被当成源码版走 python | `NEOS75_RENDER` 未传或指向不存在的文件 | 渲染直接失败，提示找不到 python | 渲染子进程报 `FileNotFoundError` | `rendererCommand()` 与 `_renderer()` 只在文件真实存在时才用 exe，否则退回脚本；`NEOS75_RENDER` 由 `push_env()` 统一注入 |

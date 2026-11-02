@@ -197,6 +197,10 @@ def _node(args):
     env['NODE_PATH'] = str(_project() / 'node_modules')
     env.pop('NEOS75_NODE_MODULES', None)
     env.pop('NODE_OPTIONS', None)
+    # 冻结版把随包渲染器交给 selftest.js，否则它会去找目标机器上的 python。
+    exe = _renderer()
+    if exe:
+        env['NEOS75_RENDER'] = exe
     return _run([node, *args], env=env)
 
 
