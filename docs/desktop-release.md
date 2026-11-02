@@ -79,3 +79,16 @@ Windows输出 `dist/Neos75-Fullscreen.exe`；Mac输出 `dist/Neos75-Fullscreen.a
 - `full` 预设下 CPU/内存大数字顶部会被裁切，用 `default` 或 `performance` 不受影响。
 
 `--self-test` 新增 `board_selftest`（13组）与 `board_registry` 两项；`--gui-smoke` 新增部件注册表、预设与默认勾选的断言。全部离线，不打开USB。
+
+### 打包版为什么带一个渲染器
+
+屏幕部件的采样、渲染、推送分别在 PowerShell、Python(Pillow)、Node 里，而打包出来的程序**不能假设目标机器装了 Python 和 Pillow**。所以构建时会把 `dashboard/render.py` 单独冻结成一个可执行文件 `Neos75-Render`（内含解释器和 Pillow），放进 `runtime/`：
+
+```
+dist/Neos75-Fullscreen.exe        主程序
+   └─ runtime/Neos75-Render.exe   随包渲染器（就是 dashboard/render.py）
+```
+
+主程序通过环境变量 `NEOS75_RENDER` 把它交给 `dashboard/push.js` 和 `dashboard/selftest.js`，两者看到该变量就直接调 exe（命令行与脚本版完全一致），否则退回「python + 脚本」。因此**源码运行和打包运行走的是同一份 render.py**，不存在两套渲染逻辑。`desktop/dash_bridge.py` 的 `_render_command()` 与 `_renderer()` 就是这条分叉点，`tests/test_dashboard.py` 的 `RendererCommand` 类把两种模式都钉住了。
+
+`render.py` 的 `_here()` 负责在冻结后找到 `widgets.json`：冻结时 `__file__` 指向临时解包目录，注册表跟着数据文件在 `sys._MEIPASS` 下，因此回退顺序是 `_MEIPASS/dashboard` → `_MEIPASS` → 脚本同目录。

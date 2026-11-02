@@ -40,7 +40,25 @@ const W = 480;
 const H = 360;
 
 const PY = process.env.NEOS75_PYTHON || 'python';
-const PS = process.env.NEOS75_PWSH || 'pwsh';
+
+// pwsh 优先，退回 Windows PowerShell 5.1（老系统上可能只有 powershell.exe）。
+// 惰性解析：只在真的要起采样进程时才探一次，避免每次 require 都白付两次 spawn。
+let _PS = null;
+function psExe() {
+  if (_PS) return _PS;
+  if (process.env.NEOS75_PWSH) { _PS = process.env.NEOS75_PWSH; return _PS; }
+  const { spawnSync } = require('node:child_process');
+  for (const name of ['pwsh', 'powershell']) {
+    try {
+      const r = spawnSync(name, ['-NoProfile', '-Command', 'exit 0'],
+        { windowsHide: true, stdio: 'ignore', timeout: 15000 });
+      if (!r.error && r.status === 0) { _PS = name; return _PS; }
+    } catch { /* 换下一个 */ }
+  }
+  _PS = 'pwsh'; // 都探不到就保持原名，让 spawn 的报错自己说话
+  return _PS;
+}
+
 const HID_VID = 0x5542;
 const HID_PID = 0x0001;
 
@@ -71,15 +89,36 @@ function parseArgs(argv) {
   return o;
 }
 
-// ── node-hid 解析：先常规 require，失败回退 NEOS75_NODE_MODULES ────
+// ── node-hid 解析 ─────────────────────────────────────────────────
+// 查找顺序：
+//   1) 常规 require('node-hid')（Node 会从 dashboard/ 逐级向上找 node_modules，
+//      所以父目录 aulac/neos75/node_modules 里的那份也能命中）
+//   2) NODE_PATH 里的每个目录
+//   3) 环境变量 NEOS75_NODE_MODULES 指向的绝对 node_modules 目录
+//   4) 仓库根与其父目录下的 node_modules（桌面端 dash_bridge 会把 NODE_PATH 指到
+//      仓库根的 node_modules，而实际安装位置可能在上一级，所以这里显式兜一层）
 function hidModule() {
   try {
     return require('node-hid');
-  } catch {
-    const root = process.env.NEOS75_NODE_MODULES;
-    if (root) return require(path.join(root, 'node-hid'));
-    throw new Error('请安装 node-hid 或设置 NEOS75_NODE_MODULES 为已有 node_modules 绝对目录');
+  } catch { /* 继续按目录挨个试 */ }
+
+  const cands = [];
+  for (const d of String(process.env.NODE_PATH || '').split(path.delimiter)) {
+    if (d.trim()) cands.push(d.trim());
   }
+  if (process.env.NEOS75_NODE_MODULES) cands.push(process.env.NEOS75_NODE_MODULES);
+  cands.push(path.join(REPO, 'node_modules'));
+  cands.push(path.join(path.dirname(REPO), 'node_modules'));
+
+  const tried = [];
+  for (const dir of cands) {
+    tried.push(dir);
+    try {
+      return require(path.join(dir, 'node-hid'));
+    } catch { /* 换下一个 */ }
+  }
+  throw new Error('找不到 node-hid。已尝试: ' + tried.join(' ; ')
+    + '。请安装 node-hid，或设置 NEOS75_NODE_MODULES 为已有 node_modules 的绝对目录');
 }
 
 // ── 采样：常驻一个 pwsh 进程，按行读 stdout ───────────────────────
@@ -95,7 +134,7 @@ function samplerArgs(intervalMs, warmup) {
 }
 
 function startSampler(intervalMs, warmup = true) {
-  const child = spawn(PS, samplerArgs(intervalMs, warmup), { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  const child = spawn(psExe(), samplerArgs(intervalMs, warmup), { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let buf = '';
   let closed = false;
   let fatal = null;
@@ -166,18 +205,28 @@ async function sampleOnce(intervalMs = 0) {
   }
 }
 
-// ── 渲染：调 python dashboard/render.py --in - ────────────────────
+// ── 渲染：源码运行时调 python dashboard/render.py；打包运行时调随包渲染器 ──
+// 桌面打包版不能让目标机器先装 Python + Pillow，所以由桌面程序通过 NEOS75_RENDER
+// 指向随包的独立渲染器可执行文件；那个 exe 就是 dashboard/render.py 冻结出来的，
+// 命令行参数完全一致。
+function rendererCommand(pyArgs) {
+  const exe = process.env.NEOS75_RENDER;
+  if (exe && fs.existsSync(exe)) return { cmd: exe, args: pyArgs };
+  return { cmd: PY, args: [path.join(HERE, 'render.py'), ...pyArgs] };
+}
+
 function renderJpeg(state, o) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'neos75-dash-'));
   const out = path.join(dir, 'frame.jpg');
-  const pyArgs = [path.join(HERE, 'render.py'), '--in', '-', '--out', out,
+  const pyArgs = ['--in', '-', '--out', out,
     '--preset', o.preset, '--quality', String(o.quality), '--state-dir', o.stateDir];
   if (o.widgets) { pyArgs.push('--widgets', o.widgets); }
   if (o.limit > 0) { pyArgs.push('--limit', String(o.limit)); }
 
+  const { cmd, args } = rendererCommand(pyArgs);
   const t0 = Date.now();
   const { spawnSync } = require('node:child_process');
-  const r = spawnSync(PY, pyArgs, { input: JSON.stringify(state), encoding: 'utf8', windowsHide: true, timeout: 60000 });
+  const r = spawnSync(cmd, args, { input: JSON.stringify(state), encoding: 'utf8', windowsHide: true, timeout: 60000 });
   const ms = Date.now() - t0;
   if (r.error) throw new Error('渲染进程启动失败: ' + r.error.message);
   if (r.status !== 0) {
@@ -369,7 +418,7 @@ async function cmdLoop(o) {
   // loop 常量：sampler 永远只 spawn 一次（pwsh 冷启动 6~8 秒）
   const interval = Math.max(1000, o.interval);
   const s = startSampler(Math.max(500, Math.min(interval, 3000)), true);
-  verbose(o, '采样进程已启动（' + PS + '，每 ' + Math.max(500, Math.min(interval, 3000)) + 'ms），推送周期 ' + interval + 'ms');
+  verbose(o, '采样进程已启动（' + psExe() + '，每 ' + Math.max(500, Math.min(interval, 3000)) + 'ms），推送周期 ' + interval + 'ms');
   verbose(o, '⚠ 协议无序列号：同一时刻只允许一个上传者，请确认没有别的推送在跑。');
 
   let stop = false;

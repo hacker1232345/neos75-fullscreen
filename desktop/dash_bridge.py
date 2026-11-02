@@ -29,13 +29,37 @@ def _project():
 
 
 def _python():
-    """渲染脚本要用的解释器：冻结版用随包的解释器，否则用当前解释器。"""
-    if getattr(sys, 'frozen', False):
-        for name in ('python.exe', 'python'):
-            cand = Path(sys._MEIPASS) / 'runtime' / name
-            if cand.exists():
-                return str(cand)
+    """渲染脚本要用的解释器：源码运行时就是当前解释器。"""
     return sys.executable or 'python'
+
+
+def _renderer():
+    """冻结版随包附带的独立渲染器（内含 Pillow）。
+
+    打包出来的程序不能假设目标机器装了 Python + Pillow，所以 build_exe.py 会把
+    dashboard/render.py 单独冻结成一个可执行文件放进 runtime/，这里优先用它。
+    源码运行时返回 None，走「解释器 + 脚本路径」的老路。
+    """
+    if not getattr(sys, 'frozen', False):
+        return None
+    names = ('Neos75-Render.exe', 'Neos75-Render')
+    bases = [Path(getattr(sys, '_MEIPASS', '.'))]
+    if sys.executable:
+        bases.append(Path(sys.executable).resolve().parent)
+    for base in bases:
+        for name in names:
+            for cand in (base / 'runtime' / name, base / name):
+                if cand.exists():
+                    return str(cand)
+    return None
+
+
+def _render_command(args):
+    """构造渲染调用：冻结版 `[渲染器, *args]`，源码版 `[python, dashboard/render.py, *args]`。"""
+    exe = _renderer()
+    if exe:
+        return [exe, *args]
+    return [_python(), 'dashboard/render.py', *args]
 
 
 def _pwsh():
@@ -78,7 +102,7 @@ def _run(command, timeout=None, cwd=None, env=None):
 # ── 离线：注册表 ──────────────────────────────────────────────────
 def registry():
     """读 dashboard/ 的部件注册表（canvas / presets / groups / widgets）。"""
-    out = _run([_python(), 'dashboard/render.py', '--list'])
+    out = _run(_render_command(['--list']))
     data = json.loads(out)
     if not isinstance(data, dict) or 'widgets' not in data:
         raise DashboardError('部件注册表格式不符合预期')
@@ -140,8 +164,8 @@ def sample(count=1, interval_ms=1500, warmup=True, on_line=None):
 def render(state_path, out_path, widgets=None, preset='default', quality=72, limit=None,
            preview=None, state_dir=None, on_line=None):
     """调 dashboard/render.py 把状态 JSON 画成 480x360 baseline JPEG。离线，不碰设备。"""
-    command = [_python(), 'dashboard/render.py', '--in', str(state_path), '--out', str(out_path),
-               '--preset', preset, '--quality', str(int(quality))]
+    command = _render_command(['--in', str(state_path), '--out', str(out_path),
+                               '--preset', preset, '--quality', str(int(quality))])
     if widgets:
         command += ['--widgets', ','.join(widgets)]
     if limit:
@@ -227,6 +251,9 @@ def push_env():
     env.pop('NODE_OPTIONS', None)
     if 'NEOS75_PYTHON' not in env:
         env['NEOS75_PYTHON'] = _python()
+    exe = _renderer()
+    if exe:
+        env['NEOS75_RENDER'] = exe
     env['PYTHONIOENCODING'] = 'utf-8'
     env['PYTHONUTF8'] = '1'
     return env

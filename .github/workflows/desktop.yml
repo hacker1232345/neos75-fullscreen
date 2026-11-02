@@ -1,7 +1,7 @@
 name: Build desktop applications
 on:
   push:
-    tags: ['v1.1.*']
+    tags: ['v1.*']
   workflow_dispatch:
 permissions:
   contents: read

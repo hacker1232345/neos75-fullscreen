@@ -29,6 +29,10 @@
 
 **`✔` 字符撞上 Windows GBK 控制台。** `render.py` 成功行带 U+2714，从 Python 子进程读 stdout 时直接 `UnicodeEncodeError: 'gbk' codec can't encode character '\u2714'`。修法是给子进程环境加 `PYTHONIOENCODING=utf-8` 和 `PYTHONUTF8=1`。这类问题只在 Windows 上出现，且只在子进程输出里出现，本地单跑不会暴露。
 
+**打包白名单漏了 `dashboard/`，差点发布一个没有屏幕部件页的程序。** 发布链路原本只收集 `tools/wallpaper/firmware/examples/docs/node_modules`，新模块不在里面。同一个位置还藏着三处：版本号在 `build_exe.py` 里硬编码 `1.1.3`（已改为读 `package.json`）、CI 的 tag 过滤只认 `v1.1.*`（已放宽到 `v1.*`）、以及 `_python()` 在冻结后回退到 `sys.executable`——那是主程序自己，让它当 Python 解释器是错的。
+
+**打包版不能假设目标机器有 Python 和 Pillow。** 主程序、`push.js`、`selftest.js` 三处都会调 `render.py`，如果都靠「目标机器的 python」，那么打包就等于没打。解法是把 `dashboard/render.py` 单独冻结成 `runtime/Neos75-Render.exe`（自带解释器和 Pillow），由 `NEOS75_RENDER` 环境变量传给下游；源码运行时该变量为空，走原来的「python + 脚本」。**两条路径共用同一份 render.py**，不存在两套渲染逻辑。冻结后 `__file__` 落在临时解包目录，所以 `render.py` 的 `_here()` 要按 `_MEIPASS/dashboard` → `_MEIPASS` → 脚本同目录 回退着找 `widgets.json`。
+
 ## 留下的债
 
 - `full` 预设下 CPU/内存大数字顶部被裁（7行缩放后卡片高度不足），未修。
@@ -50,3 +54,6 @@
 | 温度永远读不到被误当成bug | 机器不支持热区WMI | 用户以为程序坏了 | 界面上温度恒定 `n/a` | 文档明示数据源与限制，不填假数据 |
 | 为只读操作进DFU白等180秒 | 误加 `--kick` 或旧脚本仍在用 | 浪费时间，屏幕不显示画面 | 命令提示「不在DFU」后卡住 | 只读操作默认不 kick；刷写流程内复用已接管会话免费回验 |
 | 尾段现场数据被当成固件写回 | 刷写工具误把设置区列入待写扇区 | 用户设置回滚成旧值 | 刷后设置变化、该扇区字节数异常 | `screen_mcu.js` 内 `KEEP_SECTORS` 硬保护该扇区，永不列入待写 |
+| 打包版找不到部件注册表 | 冻结后 `widgets.json` 未随数据文件打包 | 屏幕部件页空白、下拉无内容 | 界面提示「部件注册表读取失败」 | `render.py` 的 `_here()` 按 `_MEIPASS/dashboard` 回退；`FrozenRenderer` 三个用例覆盖有/无注册表两种情况 |
+| 打包版被当成源码版走 python | `NEOS75_RENDER` 未传或指向不存在的文件 | 渲染直接失败，提示找不到 python | 渲染子进程报 `FileNotFoundError` | `rendererCommand()` 与 `_renderer()` 只在文件真实存在时才用 exe，否则退回脚本；`NEOS75_RENDER` 由 `push_env()` 统一注入 |
+| CI 因版本号或 tag 不匹配不发版 | `package.json` 版本与 tag 前缀不一致 | 打了 tag 却没有 Release | Actions 里 workflow 未触发 | 版本号统一从 `package.json` 读；tag 过滤放宽为 `v1.*`；构建后 `ci_smoke.py` 仍会验证自检与 GUI |

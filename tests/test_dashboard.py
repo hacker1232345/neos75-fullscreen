@@ -4,8 +4,10 @@ import io
 import importlib.util
 import json
 import re
+import sys
 import tempfile
 import unittest
+import unittest.mock
 
 ROOT=Path(__file__).resolve().parents[1]
 DASH=ROOT/'dashboard'
@@ -333,6 +335,97 @@ class Cli(unittest.TestCase):
                 with contextlib.redirect_stdout(out),contextlib.redirect_stderr(err):
                     with self.assertRaises(SystemExit) as cm:rd.main(argv)
                 self.assertNotEqual(cm.exception.code,0)
+
+
+class FrozenRenderer(unittest.TestCase):
+    """打包版（PyInstaller 冻结）下 render.py 要能自己找到 widgets.json。
+
+    冻结后 __file__ 落在临时解包目录，注册表跟着数据文件走，所以 _here() 必须
+    回退到 sys._MEIPASS。这里用假的 _MEIPASS 目录把两种情况都覆盖掉。
+    """
+
+    def _meipass(self, t, layout):
+        base=Path(t)/'_MEI'
+        for sub in layout:
+            d=base/sub if sub else base
+            d.mkdir(parents=True,exist_ok=True)
+            (d/'widgets.json').write_text(json.dumps([{'id':'cpu','label':'CPU','draw':'draw_cpu','minWidth':2,'minHeight':1}]),encoding='utf-8')
+        return base
+
+    def test_here_prefers_meipass_dashboard_dir(self):
+        with tempfile.TemporaryDirectory() as t:
+            base=self._meipass(t,['dashboard'])
+            with unittest.mock.patch.object(rd.sys,'frozen',True,create=True), \
+                 unittest.mock.patch.object(rd.sys,'_MEIPASS',str(base),create=True):
+                self.assertEqual(rd._here(),base/'dashboard')
+
+    def test_here_falls_back_to_meipass_root(self):
+        with tempfile.TemporaryDirectory() as t:
+            base=self._meipass(t,[''])
+            with unittest.mock.patch.object(rd.sys,'frozen',True,create=True), \
+                 unittest.mock.patch.object(rd.sys,'_MEIPASS',str(base),create=True):
+                self.assertEqual(rd._here(),base)
+
+    def test_here_ignores_meipass_without_registry(self):
+        with tempfile.TemporaryDirectory() as t:
+            base=Path(t)/'_MEI';base.mkdir()
+            with unittest.mock.patch.object(rd.sys,'frozen',True,create=True), \
+                 unittest.mock.patch.object(rd.sys,'_MEIPASS',str(base),create=True):
+                self.assertEqual(rd._here(),DASH)
+
+    def test_load_registry_reads_from_frozen_dir(self):
+        with tempfile.TemporaryDirectory() as t:
+            base=self._meipass(t,['dashboard'])
+            with unittest.mock.patch.object(rd.sys,'frozen',True,create=True), \
+                 unittest.mock.patch.object(rd.sys,'_MEIPASS',str(base),create=True):
+                items=rd.load_registry()
+            self.assertEqual([w['id'] for w in items],['cpu'])
+
+
+class RendererCommand(unittest.TestCase):
+    """dash_bridge 与 selftest 在打包版里必须走随包渲染器，而不是目标的 python。"""
+
+    def _bridge(self):
+        spec=importlib.util.spec_from_file_location('dash_bridge',ROOT/'desktop'/'dash_bridge.py')
+        mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
+        return mod
+
+    def test_source_mode_uses_interpreter_plus_script(self):
+        b=self._bridge()
+        with unittest.mock.patch.object(b.sys,'frozen',False,create=True):
+            self.assertIsNone(b._renderer())
+            self.assertEqual(b._render_command(['--list'])[-2:],['dashboard/render.py','--list'])
+
+    def test_frozen_mode_uses_bundled_renderer(self):
+        b=self._bridge()
+        with tempfile.TemporaryDirectory() as t:
+            rt=Path(t)/'runtime';rt.mkdir()
+            exe=rt/('Neos75-Render.exe' if sys.platform=='win32' else 'Neos75-Render')
+            exe.write_bytes(b'')
+            with unittest.mock.patch.object(b.sys,'frozen',True,create=True), \
+                 unittest.mock.patch.object(b.sys,'_MEIPASS',t,create=True):
+                self.assertEqual(b._renderer(),str(exe))
+                self.assertEqual(b._render_command(['--list']),[str(exe),'--list'])
+
+    def test_frozen_without_renderer_returns_none(self):
+        b=self._bridge()
+        with tempfile.TemporaryDirectory() as t:
+            with unittest.mock.patch.object(b.sys,'frozen',True,create=True), \
+                 unittest.mock.patch.object(b.sys,'_MEIPASS',t,create=True), \
+                 unittest.mock.patch.object(b.sys,'executable',str(Path(t)/'nothing.exe')):
+                self.assertIsNone(b._renderer())
+
+    def test_push_env_exports_renderer_when_frozen(self):
+        b=self._bridge()
+        with tempfile.TemporaryDirectory() as t:
+            rt=Path(t)/'runtime';rt.mkdir()
+            exe=rt/('Neos75-Render.exe' if sys.platform=='win32' else 'Neos75-Render')
+            exe.write_bytes(b'')
+            with unittest.mock.patch.object(b.sys,'frozen',True,create=True), \
+                 unittest.mock.patch.object(b.sys,'_MEIPASS',t,create=True):
+                env=b.push_env()
+            self.assertEqual(env['NEOS75_RENDER'],str(exe))
+            self.assertEqual(env['PYTHONIOENCODING'],'utf-8')
 
 
 if __name__=='__main__':unittest.main()

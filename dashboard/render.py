@@ -33,6 +33,22 @@ except Exception:
     pass
 
 HERE = Path(__file__).resolve().parent
+
+
+def _here():
+    """widgets.json 所在的目录。
+
+    源码运行时就是本文件所在目录；被 PyInstaller 冻结成独立渲染器后，
+    __file__ 指向临时解包目录，数据文件在 sys._MEIPASS/dashboard 下。
+    """
+    if getattr(sys, 'frozen', False):
+        base = Path(getattr(sys, '_MEIPASS', HERE))
+        for cand in (base / "dashboard", base):
+            if (cand / "widgets.json").exists():
+                return cand
+    return HERE
+
+
 W, H = 480, 360
 MARGIN = 6
 GAP = 4
@@ -80,7 +96,7 @@ class UnknownWidget(ValueError):
 
 def load_registry():
     """读取同目录 widgets.json（顶层是部件对象数组）。"""
-    raw = json.loads((HERE / "widgets.json").read_text(encoding="utf-8"))
+    raw = json.loads((_here() / "widgets.json").read_text(encoding="utf-8"))
     items = raw["widgets"] if isinstance(raw, dict) else raw
     out = []
     for it in items:
@@ -190,6 +206,85 @@ def put(d, xy, s, size, kind="mono", fill=TXT, anchor=None):
     d.text(xy, str(s), font=F(size, kind, s), fill=fill, anchor=anchor)
 
 
+def tw(s, size, kind="mono"):
+    """文本像素宽度。测量不出来就按 0.6em 估算，绝不让测量失败把绘图打断。"""
+    s = str(s)
+    try:
+        return F(size, kind, s).getlength(s)
+    except Exception:
+        return len(s) * size * 0.6
+
+
+def fitw(s, maxw, size, kind="mono", lo=8):
+    """宽度装不下时先逐级缩小字号，仍装不下就截断加省略号。返回 (文本, 字号)。"""
+    s = str(s)
+    maxw = float(maxw)
+    if maxw <= 1:
+        return "", int(lo)
+    for sz in range(int(size), int(lo) - 1, -1):
+        if tw(s, sz, kind) <= maxw:
+            return s, sz
+    for n in range(len(s) - 1, 0, -1):
+        cand = s[:n] + "…"
+        if tw(cand, int(lo), kind) <= maxw:
+            return cand, int(lo)
+    return "", int(lo)
+
+
+def _frame(d, b, label=None, fill=CARD):
+    """画卡片 + 左上角标签，返回内容区 (cx, cy, cw, ch)。
+
+    cy 从标签下沿之后才开始，数值一律限制在内容区内，
+    这样即使布局把行高压到 26px，标签与数值也不会重叠。
+    """
+    card(d, b, fill)
+    lab = _fs(b["h"], 0.17, 8, 15)
+    if label:
+        put(d, (b["x"] + 7, b["y"] + 5), label, lab, "bd", DIM)
+    cx = b["x"] + 7
+    cy = b["y"] + lab + 7
+    cw = max(4, b["w"] - 14)
+    ch = max(4, b["y"] + b["h"] - 5 - cy)
+    return cx, cy, cw, ch
+
+
+def _metric(d, b, label, value, unit, color, sub=None, pct=None, fill=CARD):
+    """标准指标卡：标签 + 大数值 + 单位 + 可选副行 + 可选进度条。
+
+    纵向预算全部按内容区高度 ch 分配，因此任意格子高度都不会重叠或越出卡片。
+    数值优先：装不下时先缩小字号，仍装不下就整段去掉单位（百分比落到副行）。
+    """
+    cx, cy, cw, ch = _frame(d, b, label, fill)
+    bar_h = max(4, int(ch * 0.18)) if (pct is not None and ch >= 26) else 0
+    sub_h = max(9, int(ch * 0.22)) if (sub and ch >= 22) else 0
+    inner = ch - bar_h - sub_h - (3 if (bar_h or sub_h) else 0)
+    vs = max(9, min(40, int(max(9, inner) * 0.94)))
+    us = max(8, int(vs * 0.48))
+    val = value
+    unit = unit or ""
+    # 先试探：带单位时数值能不能保持在合理字号
+    uw = tw(unit, us, "bd") if unit else 0
+    room = cw - uw - (3 if unit else 0)
+    if unit and tw(value, vs, "bd") > room and room < tw(value, max(9, int(vs * 0.8)), "bd"):
+        # 单位挤掉了太多宽度，且缩到八折仍不够 → 去掉单位，宽度全给数值
+        if sub:
+            sub = sub + " " + unit
+        unit, uw, room = "", 0, cw
+    vtxt, vs = fitw(value, room, vs, "bd", 9)
+    ymid = cy + max(9, inner) * 0.5
+    put(d, (cx, ymid), vtxt, vs, "bd", color, anchor="lm")
+    if unit:
+        put(d, (cx + cw, ymid), unit, us, "bd", color, anchor="rm")
+    y = cy + max(9, inner)
+    if sub_h:
+        stxt, ssz = fitw(sub, cw, sub_h, "mono", 8)
+        put(d, (cx, y + sub_h * 0.5), stxt, ssz, "mono", DIM, anchor="lm")
+        y += sub_h + 3
+    if bar_h:
+        bar(d, cx, y, cw, bar_h, pct, color)
+    return cx, cy, cw, ch
+
+
 # ── 布局 ──────────────────────────────────────────────────────────
 def layout(ids):
     """把部件 id 列表排进 480x360。返回 (boxes, info)。
@@ -243,14 +338,26 @@ def layout(ids):
 
     if sum(base_h) + gaps_h > avail:
         scaled = True
-        heights = list(base_h)
+        # 按「各行的 minHeight 超出下限的部分」等比缩放，而不是一轮一轮削最大值——
+        # 后者会把所有行压成同一高度，矮行（如 ip/host 只要 44）跟着被削，
+        # 而高行（时钟 96）也没得到应有的份额。
         floor = 26
+        budget = max(1, avail - gaps_h)
+        n = len(base_h)
+        reducible = sum(base_h) - n * floor
+        if reducible > 0:
+            f = 1.0 - float(sum(base_h) - budget) / float(reducible)
+            f = max(0.0, min(1.0, f))
+        else:
+            f = 0.0
+        heights = [max(floor, int(floor + (b - floor) * f)) for b in base_h]
+        # 取整后可能仍超，继续从当前最高的行往下削
         while sum(heights) + gaps_h > avail:
-            idx = max(range(len(heights)), key=lambda i: heights[i])
+            idx = max(range(n), key=lambda i: heights[i])
             if heights[idx] <= floor:
                 break
             heights[idx] -= 1
-        if sum(heights) + gaps_h > avail:
+        if sum(heights) + gaps_h > avail:  # 连下限都放不下（行数极端多）才走整体缩放
             room = max(1, avail - gaps_h)
             s = room / float(sum(heights))
             heights = [max(1, int(h * s)) for h in heights]
@@ -297,164 +404,146 @@ def resolve_widgets(widgets=None, preset="default"):
 
 # ── 各部件绘制 ────────────────────────────────────────────────────
 def draw_clock_big(d, b, st, ctx):
-    card(d, b, CARD_HI)
-    v = txt(st.get("clock"), "--:--:--")
-    put(d, (b["x"] + b["w"] / 2, b["y"] + b["h"] * 0.58), v, _fs(b["h"], 0.40, 14, 54), "bd", ACCENT, anchor="mm")
-    put(d, (b["x"] + 8, b["y"] + 6), "时间", _fs(b["h"], 0.17, 9, 15), "bd", DIM)
+    cx, cy, cw, ch = _frame(d, b, "时间", CARD_HI)
+    vs = max(14, min(54, int(ch * 0.80)))
+    vtxt, vs = fitw(txt(st.get("clock"), "--:--:--"), cw, vs, "bd", 14)
+    put(d, (cx + cw / 2, cy + ch / 2), vtxt, vs, "bd", ACCENT, anchor="mm")
 
 
 def draw_date(d, b, st, ctx):
-    card(d, b)
-    cap(d, b, "日期")
-    v = txt(st.get("date"))
-    put(d, (b["x"] + b["w"] / 2, b["y"] + b["h"] * 0.65), v, _fs(b["h"], 0.34, 11, 30), "mono", TXT, anchor="mm")
+    cx, cy, cw, ch = _frame(d, b, "日期")
+    vs = max(10, min(30, int(ch * 0.86)))
+    vtxt, vs = fitw(txt(st.get("date")), cw, vs, "mono", 10)
+    put(d, (cx + cw / 2, cy + ch / 2), vtxt, vs, "mono", TXT, anchor="mm")
 
 
 def draw_cpu(d, b, st, ctx):
-    card(d, b)
-    cap(d, b, "CPU")
     p = st.get("cpu_load")
     c = pick(p)
-    put(d, (b["x"] + 8, b["y"] + b["h"] * 0.40), num(p, 1), _fs(b["h"], 0.40, 14, 40), "bd", c, anchor="lm")
-    put(d, (b["x"] + b["w"] - 8, b["y"] + b["h"] * 0.40), "%", _fs(b["h"], 0.20, 10, 18), "bd", c, anchor="rm")
     fq = st.get("cpu_freq_ghz")
-    put(d, (b["x"] + 8, b["y"] + b["h"] - 10), ("%s GHz" % num(fq, 2)) if fq is not None else "n/a",
-        _fs(b["h"], 0.15, 9, 13), "mono", DIM, anchor="ls")
-    bar(d, b["x"] + 8, b["y"] + b["h"] * 0.62, b["w"] - 16, max(5, int(b["h"] * 0.10)), p, c)
+    _metric(d, b, "CPU", num(p, 1), "%", c,
+            sub=("%s GHz" % num(fq, 2)) if fq is not None else "n/a", pct=p)
 
 
 def draw_mem(d, b, st, ctx):
-    card(d, b)
-    cap(d, b, "内存")
     p = st.get("mem_pct")
     c = pick(p, 75, 92)
-    put(d, (b["x"] + 8, b["y"] + b["h"] * 0.40), num(p, 1), _fs(b["h"], 0.40, 14, 40), "bd", c, anchor="lm")
-    put(d, (b["x"] + b["w"] - 8, b["y"] + b["h"] * 0.40), "%", _fs(b["h"], 0.20, 10, 18), "bd", c, anchor="rm")
-    put(d, (b["x"] + 8, b["y"] + b["h"] - 10), "%s / %s GB" % (num(st.get("mem_used_gb"), 1), num(st.get("mem_total_gb"), 1)),
-        _fs(b["h"], 0.15, 9, 13), "mono", DIM, anchor="ls")
-    bar(d, b["x"] + 8, b["y"] + b["h"] * 0.62, b["w"] - 16, max(5, int(b["h"] * 0.10)), p, c)
+    sub = "%s / %s GB" % (num(st.get("mem_used_gb"), 1), num(st.get("mem_total_gb"), 1))
+    _metric(d, b, "内存", num(p, 1), "%", c, sub=sub, pct=p)
 
 
 def draw_gpu(d, b, st, ctx):
-    card(d, b)
-    cap(d, b, "GPU")
     g = st.get("gpu_pct")
-    c = pick(g)
-    put(d, (b["x"] + 8, b["y"] + b["h"] * 0.62), num(g, 0), _fs(b["h"], 0.40, 14, 40), "bd", c, anchor="lm")
-    if g is not None:
-        put(d, (b["x"] + b["w"] - 8, b["y"] + b["h"] * 0.62), "%", _fs(b["h"], 0.20, 10, 18), "bd", c, anchor="rm")
+    _metric(d, b, "GPU", num(g, 0), "%" if g is not None else "", pick(g), pct=g)
 
 
 def draw_temp(d, b, st, ctx):
-    card(d, b)
-    cap(d, b, "温度")
     t = st.get("temp_c")
-    c = temp_color(t)
-    put(d, (b["x"] + 8, b["y"] + b["h"] * 0.62), num(t, 1), _fs(b["h"], 0.40, 14, 40), "bd", c, anchor="lm")
-    put(d, (b["x"] + b["w"] - 8, b["y"] + b["h"] * 0.62), "°C" if t is not None else "", _fs(b["h"], 0.20, 10, 18), "bd", c, anchor="rm")
+    _metric(d, b, "温度", num(t, 1), "°C" if t is not None else "", temp_color(t), pct=t)
 
 
 def draw_disk(d, b, st, ctx):
-    card(d, b)
-    cap(d, b, "磁盘剩余")
-    v = st.get("disk_free_gb")
-    put(d, (b["x"] + 8, b["y"] + b["h"] * 0.62), num(v, 1), _fs(b["h"], 0.38, 13, 36), "bd", TXT, anchor="lm")
-    put(d, (b["x"] + b["w"] - 8, b["y"] + b["h"] * 0.62), "GB", _fs(b["h"], 0.18, 10, 16), "bd", DIM, anchor="rm")
+    _metric(d, b, "磁盘剩余", num(st.get("disk_free_gb"), 1), "GB", TXT)
 
 
 def draw_net(d, b, st, ctx):
-    card(d, b)
-    cap(d, b, "网络")
+    cx, cy, cw, ch = _frame(d, b, "网络")
     dn, up = st.get("net_down_mbps"), st.get("net_up_mbps")
-    fs = _fs(b["h"], 0.26, 11, 24)
-    put(d, (b["x"] + 8, b["y"] + b["h"] * 0.52), "↓ %s" % num(dn, 2), fs, "mono", GOOD, anchor="lm")
-    put(d, (b["x"] + 8, b["y"] + b["h"] * 0.80), "↑ %s Mbps" % num(up, 2), _fs(b["h"], 0.16, 9, 14), "mono", ACCENT, anchor="lm")
+    half = ch / 2.0
+    ds = max(10, min(24, int(half * 0.86)))
+    dtxt, ds = fitw("↓ %s" % num(dn, 2), cw, ds, "mono", 10)
+    put(d, (cx, cy + half * 0.5), dtxt, ds, "mono", GOOD, anchor="lm")
+    us = max(8, min(14, int(half * 0.62)))
+    utxt, us = fitw("↑ %s Mbps" % num(up, 2), cw, us, "mono", 8)
+    put(d, (cx, cy + half * 1.5), utxt, us, "mono", ACCENT, anchor="lm")
 
 
 def draw_battery(d, b, st, ctx):
-    card(d, b)
-    cap(d, b, "电池")
     p = st.get("bat_pct")
     if p is None:
-        put(d, (b["x"] + b["w"] / 2, b["y"] + b["h"] * 0.60), "AC", _fs(b["h"], 0.36, 14, 34), "bd", NA, anchor="mm")
-        put(d, (b["x"] + 8, b["y"] + b["h"] - 10), "无电池 / 台式机", _fs(b["h"], 0.15, 9, 13), "reg", DIM, anchor="ls")
+        cx, cy, cw, ch = _frame(d, b, "电池")
+        vs = max(12, min(34, int(ch * 0.80)))
+        put(d, (cx + cw / 2, cy + ch / 2), "AC", vs, "bd", NA, anchor="mm")
         return
     c = GOOD if p > 30 else (WARN if p > 15 else BAD)
-    put(d, (b["x"] + 8, b["y"] + b["h"] * 0.42), num(p, 0), _fs(b["h"], 0.40, 14, 40), "bd", c, anchor="lm")
-    put(d, (b["x"] + b["w"] - 8, b["y"] + b["h"] * 0.42), "%", _fs(b["h"], 0.20, 10, 18), "bd", c, anchor="rm")
-    if st.get("bat_charging"):
-        tag = "充电中"
-    elif st.get("bat_ac"):
-        tag = "交流供电"
-    else:
-        tag = "放电中"
-    put(d, (b["x"] + 8, b["y"] + b["h"] - 10), tag, _fs(b["h"], 0.15, 9, 13), "reg", DIM, anchor="ls")
-    bar(d, b["x"] + 8, b["y"] + b["h"] * 0.64, b["w"] - 16, max(5, int(b["h"] * 0.10)), p, c)
+    tag = "充电中" if st.get("bat_charging") else ("交流供电" if st.get("bat_ac") else "放电中")
+    _metric(d, b, "电池", num(p, 0), "%", c, sub=tag, pct=p)
 
 
 def draw_uptime(d, b, st, ctx):
-    card(d, b)
-    cap(d, b, "运行时长")
-    put(d, (b["x"] + b["w"] / 2, b["y"] + b["h"] * 0.66), txt(st.get("uptime")), _fs(b["h"], 0.30, 11, 26), "mono", TXT, anchor="mm")
+    cx, cy, cw, ch = _frame(d, b, "运行时长")
+    vs = max(10, min(26, int(ch * 0.84)))
+    vtxt, vs = fitw(txt(st.get("uptime")), cw, vs, "mono", 10)
+    put(d, (cx + cw / 2, cy + ch / 2), vtxt, vs, "mono", TXT, anchor="mm")
 
 
 def draw_volume(d, b, st, ctx):
-    card(d, b)
-    cap(d, b, "音量")
     v = st.get("vol_pct")
-    c = ACCENT if v is not None else NA
-    put(d, (b["x"] + 8, b["y"] + b["h"] * 0.55), num(v, 0), _fs(b["h"], 0.36, 13, 34), "bd", c, anchor="lm")
-    put(d, (b["x"] + b["w"] - 8, b["y"] + b["h"] * 0.55), "%" if v is not None else "", _fs(b["h"], 0.18, 10, 16), "bd", c, anchor="rm")
-    if v is not None:
-        bar(d, b["x"] + 8, b["y"] + b["h"] * 0.74, b["w"] - 16, max(4, int(b["h"] * 0.09)), v, ACCENT)
+    _metric(d, b, "音量", num(v, 0), "%" if v is not None else "", ACCENT if v is not None else NA, pct=v)
 
 
 def draw_host(d, b, st, ctx):
-    card(d, b)
-    cap(d, b, "主机")
-    put(d, (b["x"] + 8, b["y"] + b["h"] * 0.68), txt(st.get("host"))[:28], _fs(b["h"], 0.30, 10, 22), "mono", TXT, anchor="lm")
+    cx, cy, cw, ch = _frame(d, b, "主机")
+    vs = max(9, min(22, int(ch * 0.80)))
+    vtxt, vs = fitw(txt(st.get("host")), cw, vs, "mono", 9)
+    put(d, (cx, cy + ch / 2), vtxt, vs, "mono", TXT, anchor="lm")
 
 
 def draw_ip(d, b, st, ctx):
-    card(d, b)
-    cap(d, b, "IP")
-    put(d, (b["x"] + 8, b["y"] + b["h"] * 0.68), txt(st.get("ip"))[:24], _fs(b["h"], 0.30, 10, 22), "mono", TXT, anchor="lm")
+    cx, cy, cw, ch = _frame(d, b, "IP")
+    vs = max(9, min(22, int(ch * 0.80)))
+    vtxt, vs = fitw(txt(st.get("ip")), cw, vs, "mono", 9)
+    put(d, (cx, cy + ch / 2), vtxt, vs, "mono", TXT, anchor="lm")
 
 
 def draw_top_proc(d, b, st, ctx):
-    card(d, b)
-    cap(d, b, "最占进程")
-    name = st.get("top_proc")
+    cx, cy, cw, ch = _frame(d, b, "最占进程")
+    name = txt(st.get("top_proc"))
     p = st.get("top_proc_pct")
-    put(d, (b["x"] + 8, b["y"] + b["h"] * 0.55), txt(name)[:20], _fs(b["h"], 0.28, 11, 24), "mono", TXT, anchor="lm")
-    put(d, (b["x"] + b["w"] - 8, b["y"] + b["h"] * 0.85), ("%s%%" % num(p, 1)) if p is not None else "n/a",
-        _fs(b["h"], 0.16, 9, 14), "mono", pick(p), anchor="rs")
+    line2 = ch >= 30  # 高格子才分两行，矮格子挤一行
+    if line2:
+        top = ch * 0.58
+        ns = max(10, min(24, int(top * 0.82)))
+        ntxt, ns = fitw(name, cw, ns, "mono", 10)
+        put(d, (cx, cy + top * 0.5), ntxt, ns, "mono", TXT, anchor="lm")
+        ps = max(8, min(14, int((ch - top) * 0.72)))
+        ptxt = ("%s%%" % num(p, 1)) if p is not None else "n/a"
+        ptxt, ps = fitw(ptxt, cw, ps, "mono", 8)
+        put(d, (cx, cy + top + (ch - top) * 0.5), ptxt, ps, "mono", pick(p), anchor="lm")
+    else:
+        ptxt = ("%s%%" % num(p, 1)) if p is not None else "n/a"
+        ps = max(8, min(14, int(ch * 0.62)))
+        pw = tw(ptxt, ps, "mono")
+        ns = max(9, min(24, int(ch * 0.80)))
+        ntxt, ns = fitw(name, cw - pw - 6, ns, "mono", 9)
+        put(d, (cx, cy + ch / 2), ntxt, ns, "mono", TXT, anchor="lm")
+        put(d, (cx + cw, cy + ch / 2), ptxt, ps, "mono", pick(p), anchor="rm")
 
 
 def draw_history_cpu(d, b, st, ctx):
-    card(d, b)
-    cap(d, b, "CPU 历史")
+    cx, cy, cw, ch = _frame(d, b, "CPU 历史")
     hist = (ctx or {}).get("history") or []
-    x0, y0 = b["x"] + 8, b["y"] + b["h"] * 0.30
-    ww, hh = b["w"] - 16, b["h"] * 0.60
-    if ww < 8 or hh < 8:
+    if cw < 8 or ch < 10:
         return
-    d.line([x0, y0 + hh, x0 + ww, y0 + hh], fill=LINE)
+    y0 = cy
+    hh = ch
+    d.line([cx, y0 + hh, cx + cw, y0 + hh], fill=LINE)
     if len(hist) < 2:
-        put(d, (b["x"] + b["w"] / 2, y0 + hh / 2), "n/a（需要 --state-dir）", _fs(b["h"], 0.16, 9, 13), "reg", NA, anchor="mm")
+        put(d, (cx + cw / 2, y0 + hh / 2), "n/a（需要 --state-dir）",
+            max(8, min(13, int(ch * 0.5))), "reg", NA, anchor="mm")
         return
     vals = [h.get("cpu") for h in hist]
     vals = [v for v in vals if v is not None]
     if len(vals) < 2:
-        put(d, (b["x"] + b["w"] / 2, y0 + hh / 2), "n/a", _fs(b["h"], 0.20, 10, 16), "mono", NA, anchor="mm")
+        put(d, (cx + cw / 2, y0 + hh / 2), "n/a", max(9, min(16, int(ch * 0.6))), "mono", NA, anchor="mm")
         return
     n = len(vals)
-    step = ww / float(n - 1)
-    pts = [(x0 + i * step, y0 + hh - (max(0.0, min(100.0, float(v))) / 100.0) * hh) for i, v in enumerate(vals)]
+    step = cw / float(n - 1)
+    pts = [(cx + i * step, y0 + hh - (max(0.0, min(100.0, float(v))) / 100.0) * hh) for i, v in enumerate(vals)]
     d.line(pts, fill=ACCENT, width=2, joint="curve")
     cur = vals[-1]
-    put(d, (b["x"] + b["w"] - 8, b["y"] + 6), "%s%%" % num(cur, 0), _fs(b["h"], 0.17, 9, 15), "bd", pick(cur), anchor="ra")
-    put(d, (b["x"] + 8, b["y"] + b["h"] - 10), "共 %d 点" % n, _fs(b["h"], 0.15, 9, 12), "reg", FAINT, anchor="ls")
+    put(d, (cx + cw, cy - 2), "%s%%" % num(cur, 0), _fs(b["h"], 0.17, 8, 15), "bd", pick(cur), anchor="ra")
+
 
 
 DRAW_FNS = {

@@ -21,6 +21,10 @@ const HERE = __dirname;
 const REPO = path.resolve(HERE, '..');
 const PY = process.env.NEOS75_PYTHON || 'python';
 const RENDER = path.join(HERE, 'render.py');
+// 打包版由桌面程序通过 NEOS75_RENDER 指向随包的独立渲染器（它就是 render.py
+// 冻结出来的，命令行一致），这样自检不依赖目标机器上的 Python/Pillow。
+const RENDER_EXE = process.env.NEOS75_RENDER && fs.existsSync(process.env.NEOS75_RENDER)
+  ? process.env.NEOS75_RENDER : null;
 const W = 480, H = 360;
 
 const t = require('../wallpaper/screen_wallpaper.js');
@@ -29,7 +33,9 @@ let groups = 0;
 const ok = () => groups++;
 
 function runRender(args, input) {
-  return spawnSync(PY, [RENDER, ...args], {
+  const cmd = RENDER_EXE || PY;
+  const argv = RENDER_EXE ? args : [RENDER, ...args];
+  return spawnSync(cmd, argv, {
     input, encoding: 'utf8', windowsHide: true, timeout: 120000,
     cwd: REPO,
   });
