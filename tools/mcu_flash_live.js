@@ -1,9 +1,10 @@
 'use strict';
 const fs=require('fs'),path=require('path'),crypto=require('crypto');
 const {openDfu,mk,kick,closeDfu,sleep,log}=require('./mcu_dfu');
+const {buildFirmware,firmwareKind}=require('./firmware_image');
 const backupPath=process.env.NEOS75_BASELINE||path.join(__dirname,'..','mcu-before-fullscreen.bin');
 const baseline=fs.readFileSync(backupPath);
-if(crypto.createHash('sha256').update(baseline).digest('hex')!=='c69c38b02841c533db44e8b058a6b86d4a0e816d2bb6ce95cd2b1d5d6927016d')throw Error('现场备份SHA256不符');
+if(firmwareKind(baseline)!=='supported-original')throw Error('现场备份代码区域SHA256不符');
 const official=Buffer.concat([baseline,Buffer.alloc(16)]);
 const BASE=0x8000,SEC=8192,LEN=official.length-16;
 const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
@@ -16,7 +17,7 @@ async function main(){
  const sectors=[];if(target)for(let o=0;o<LEN;o+=SEC)if(!target.subarray(o,o+SEC).equals(official.subarray(o,Math.min(LEN,o+SEC))))sectors.push(o);
  if(['flash','restore'].includes(mode)){
   const backup=fs.readFileSync(backupFile);if(!backup.equals(official.subarray(0,LEN)))throw Error('备份不等于本机原始MCU，禁止套用补丁');
-  if(sha(fs.readFileSync(file))!=='3c922e809dcfac1c35ad8f1f8caebcfc999bf6475a3e6fa22fd18c5d85a4f6e5')throw Error('目标固件SHA256不匹配');
+  if(!fs.readFileSync(file).equals(buildFirmware(baseline)))throw Error('目标固件不等于当前备份生成结果（含配置和DFU校验）');
   if(sectors.map(o=>BASE+o).join(',')!==[0x10000,0x32000,0x36000,0x42000].join(','))throw Error('差异范围异常');
  }
  let s=await openDfu(8000);if(!s){await kick();s=await openDfu(40000);}if(!s)throw Error('屏幕DFU不可用');

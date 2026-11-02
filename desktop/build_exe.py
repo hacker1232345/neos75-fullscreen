@@ -59,12 +59,12 @@ def main():
     else:
         spec_text+="exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='Neos75-Fullscreen', debug=False, strip=False, upx=False, console=False)\n"
         spec_text+="coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='Neos75-Fullscreen')\n"
-        spec_text+="app = BUNDLE(coll, name='Neos75-Fullscreen.app', bundle_identifier='io.github.hacker1232345.neos75fullscreen', info_plist={'CFBundleShortVersionString':'1.1.0','NSHighResolutionCapable':True,'LSMinimumSystemVersion':'15.0'})\n"
+        spec_text+="app = BUNDLE(coll, name='Neos75-Fullscreen.app', bundle_identifier='io.github.hacker1232345.neos75fullscreen', info_plist={'CFBundleShortVersionString':'1.1.1','NSHighResolutionCapable':True,'LSMinimumSystemVersion':'15.0'})\n"
     spec.write_text(spec_text,encoding='utf-8')
     cmd=[sys.executable,'-m','PyInstaller','--noconfirm','--distpath',str(a.dist),'--workpath',str(a.work/'pyinstaller'),str(spec)]
     subprocess.run(cmd,cwd=ROOT,check=True)
     exe=a.dist/('Neos75-Fullscreen.exe' if sys.platform=='win32' else 'Neos75-Fullscreen.app/Contents/MacOS/Neos75-Fullscreen')
-    info={'version':'1.1.0','platform':sys.platform+'-'+platform.machine(),'bytes':exe.stat().st_size,'sha256':hashlib.sha256(exe.read_bytes()).hexdigest(),'node':version,'pyinstaller':subprocess.check_output([sys.executable,'-m','PyInstaller','--version'],text=True).strip()}
+    info={'version':'1.1.1','platform':sys.platform+'-'+platform.machine(),'bytes':exe.stat().st_size,'sha256':hashlib.sha256(exe.read_bytes()).hexdigest(),'node':version,'pyinstaller':subprocess.check_output([sys.executable,'-m','PyInstaller','--version'],text=True).strip()}
     (a.dist/'Neos75-Fullscreen.sha256.json').write_text(json.dumps(info,indent=2),encoding='utf-8')
     print(json.dumps(info))
 

@@ -7,8 +7,9 @@ MANIFEST=ROOT/'firmware/fullscreen.patch.json'
 
 def patch(source):
     m=json.loads(MANIFEST.read_text(encoding='utf-8'))
-    if len(source)!=m['payload_bytes'] or hashlib.sha256(source).hexdigest()!=m['source_sha256']:
-        raise ValueError('原始备份长度或SHA256不匹配，拒绝生成。仅支持README注明的实测版本。')
+    code_bytes=m['immutable_payload_bytes']
+    if len(source)!=m['payload_bytes'] or hashlib.sha256(source[:code_bytes]).hexdigest()!=m['source_code_sha256']:
+        raise ValueError('原始备份长度或代码区域SHA256不匹配，拒绝生成。仅支持README注明的实测代码版本。')
     out=bytearray(source)
     for p in m['patches']:
         o=int(p['offset'],16);before=bytes.fromhex(p['before']);after=bytes.fromhex(p['after'])
@@ -20,8 +21,9 @@ def patch(source):
     out.extend(bytes.fromhex(m['dfu_suffix_prefix_hex']))
     out.extend(struct.pack('<I',(~zlib.crc32(out))&0xffffffff))
     result=bytes(out)
-    if hashlib.sha256(result).hexdigest()!=m['target_sha256']:
-        raise ValueError('生成目标SHA256不匹配')
+    if hashlib.sha256(result[:code_bytes]).hexdigest()!=m['target_code_sha256'] or result[code_bytes:len(source)]!=source[code_bytes:]:
+        raise ValueError('生成目标代码或配置保留校验不匹配')
+    m={**m,'actual_source_sha256':hashlib.sha256(source).hexdigest(),'target_sha256':hashlib.sha256(result).hexdigest()}
     return result,m
 
 if __name__=='__main__':

@@ -16,7 +16,7 @@ import zlib
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = '1.1.0'
+VERSION = '1.1.1'
 PROJECT = Path(sys._MEIPASS) / 'project' if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
 NODE = Path(sys._MEIPASS) / ('runtime/node.exe' if sys.platform == 'win32' else 'runtime/node') if getattr(sys, 'frozen', False) else Path(shutil.which('node') or 'node')
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
@@ -31,13 +31,11 @@ def builder():
 
 
 def validate_firmware(baseline, target):
-    m = json.loads((PROJECT / 'firmware/fullscreen.patch.json').read_text(encoding='utf-8'))
     source = Path(baseline).read_bytes()
     image = Path(target).read_bytes()
-    if len(source) != m['payload_bytes'] or hashlib.sha256(source).hexdigest() != m['source_sha256']:
-        raise ValueError('原始备份与已验证版本不匹配。未连接设备。')
-    if len(image) != m['payload_bytes'] + 16 or hashlib.sha256(image).hexdigest() != m['target_sha256']:
-        raise ValueError('目标固件与已验证补丁不匹配。未连接设备。')
+    expected, m = builder().patch(source)
+    if image != expected:
+        raise ValueError('目标固件与当前备份生成结果不匹配（含配置和DFU校验）。未连接设备。')
     return m
 
 

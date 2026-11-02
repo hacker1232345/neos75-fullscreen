@@ -19,7 +19,7 @@
 ## 内容
 
 - `firmware/fullscreen.patch.json`：精确旧/新字节、地址、原始和目标SHA256；仅改变27个载荷字节。
-- `tools/build_fullscreen.py`：纯Python标准库生成器；匹配的用户自有备份可生成本次实测完全一致的固件。
+- `tools/build_fullscreen.py`：纯Python标准库生成器；代码匹配的用户自有备份可生成全屏固件，并保留自己的末尾4KB数据。
 - `tools/mcu_dfu.js`、`mcu_flash_live.js`：MCU DFU传输及带备份/回验的本机专用刷写工具。
 - `wallpaper/`：官方壁纸协议的JPEG上传工具和差分测试。GIF全屏由补丁支持，日常GIF导入使用官方程序；本JPEG工具不提供通用GIF转换。
 - `examples/`：480×360边框图和两帧GIF。
@@ -29,13 +29,13 @@
 
 ## 适配范围
 
-目前只支持实测备份SHA256：
+目前只适配实测代码构建。参考备份的完整SHA256为：
 
 ```
 c69c38b02841c533db44e8b058a6b86d4a0e816d2bb6ce95cd2b1d5d6927016d
 ```
 
-备份长度491520字节，映射0x8000..0x80000。不同固件版本和其他设备必须重新定位，生成器会拒绝不匹配输入。设备型号相同不代表固件构建相同。
+备份长度491520字节，映射0x8000..0x80000。程序严格核对前487424字节代码区域SHA256与全部补丁原字节，末尾4096字节现场数据保持原样。整片哈希因现场数据不同可能变化。其他代码构建必须重新定位，不能仅凭型号相同套用。
 
 ## 安装与离线验证
 
@@ -47,17 +47,19 @@ npm test
 python -m unittest discover -s tests -v
 ```
 
-用已取得、匹配本版本的原始备份生成目标（这一步不连接设备）：
+用程序读取并确认代码版本匹配的原始备份生成目标（这一步不连接设备）：
 
 ```sh
 python tools/build_fullscreen.py --source /path/to/mcu-before-fullscreen.bin --out /path/to/mcu-fullscreen-live-v1.bin
 ```
 
-输出491536字节（含16字节DFU后缀），目标SHA256：
+输出491536字节（含16字节DFU后缀），参考备份对应的目标SHA256：
 
 ```
 3c922e809dcfac1c35ad8f1f8caebcfc999bf6475a3e6fa22fd18c5d85a4f6e5
 ```
+
+若末尾现场数据与参考备份不同，生成目标的完整SHA256也会不同；以本机生成结果和代码区域校验为准，刷写前会逐字节重建比对，确保末尾数据来自本机备份。
 
 需运行固件模型测试时，把匹配备份放仓库根目录并以默认输出路径生成，再执行 `npm run test:device-image`；这些文件已加入gitignore。ARM指令仿真额外需要 `pip install -r requirements-dev.txt`，然后执行 `python tools/test_arm_emulation.py`。仿真不覆盖LCD、硬件JPEG和真实堆。
 

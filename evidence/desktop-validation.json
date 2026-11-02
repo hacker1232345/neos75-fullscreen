@@ -1,0 +1,13 @@
+{
+  "windows_hardware_query": "PASS 480x360",
+  "complete_live_backup_bytes": 491520,
+  "live_backup_reads_per_chunk": 2,
+  "live_backup_app_returned": true,
+  "live_backup_flash_written": false,
+  "live_backup_reclassified_by_code_hash": "already-fullscreen",
+  "configuration_preservation": "PASS last 4096 bytes preserved",
+  "python_node_generator_byte_equality": "PASS including DFU CRC",
+  "flash_models_with_variant_configuration": "PASS program, verify, restore, interruption recovery",
+  "changed_payload_bytes": 27,
+  "mac_hardware_usb_dfu": "not verified"
+}
