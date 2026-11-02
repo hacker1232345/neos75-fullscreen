@@ -1,12 +1,13 @@
 'use strict';
 const fs=require('fs'),path=require('path'),crypto=require('crypto');
 const {openDfu,mk,kick,closeDfu,sleep,log}=require('./mcu_dfu');
-const {buildFirmware,firmwareKind}=require('./firmware_image');
+const {buildFirmware,firmwareKind,selectManifest}=require('./firmware_image');
 const backupPath=process.env.NEOS75_BASELINE||path.join(__dirname,'..','mcu-before-fullscreen.bin');
 const baseline=fs.readFileSync(backupPath);
 const force=process.argv.includes('--force');
 if(baseline.length!==491520)throw Error('现场备份长度不完整');
 if(!force&&firmwareKind(baseline)!=='supported-original')throw Error('现场备份代码区域SHA256不符');
+const profile=selectManifest(baseline,force);
 const official=Buffer.concat([baseline,Buffer.alloc(16)]);
 const BASE=0x8000,SEC=8192,LEN=official.length-16;
 const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
@@ -20,10 +21,11 @@ async function main(){
  if(['flash','restore'].includes(mode)){
   const backup=fs.readFileSync(backupFile);if(!backup.equals(official.subarray(0,LEN)))throw Error('备份不等于本机原始MCU，禁止套用补丁');
   if(!fs.readFileSync(file).equals(buildFirmware(baseline,force)))throw Error('目标固件不等于当前备份生成结果（含配置和DFU校验）');
-  const allowed=[0x10000,0x32000,0x36000,0x42000];
+  const allowed=[...new Set(profile.patches.map(p=>BASE+Math.floor(parseInt(p.offset,16)/SEC)*SEC))].sort((a,b)=>a-b);
   if(force?sectors.some(o=>!allowed.includes(BASE+o)):sectors.map(o=>BASE+o).join(',')!==allowed.join(','))throw Error('差异范围异常');
  }
- if(force)log('无验证模式：已跳过版本哈希和补丁旧字节检查；不代表固件兼容。保留备份、现场扇区检查与写后回验。');
+ log('自动选择固件配置',profile.profile,profile.validation);
+ if(force)log('无验证模式：已跳过版本哈希和补丁旧字节检查；未知构建使用原验证构建的固定偏移，不代表自动适配。保留备份、现场扇区检查与写后回验。');
  let s=await openDfu(8000);if(!s){await kick();s=await openDfu(40000);}if(!s)throw Error('屏幕DFU不可用');
  const D=mk(s);
  const read=async(addr,len)=>{const out=Buffer.alloc(len);for(let i=0;i<len;i+=64){const n=Math.min(64,len-i),b=await D.read(addr+i,n);if(b.length!==n)throw Error('短读');b.copy(out,i);}return out;};

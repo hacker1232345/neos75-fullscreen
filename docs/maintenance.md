@@ -31,3 +31,6 @@ node wallpaper/screen_wallpaper.js send examples/fullscreen-test-1.jpg --yes
 ```
 
 原厂上传尾段无最终ACK。工具返回displayVerified:false，必须看实屏确认，且不要同时开其他上传程序。GIF日常使用官方程序导入。
+
+
+v1.1.3的原始备份按哈希自动选择对应构建配置。两种已知构建均无需 `--force`，生成和维护时使用同一份本机原始备份与其生成目标。Issue #1构建经过离线定位和模型验证，实屏待验收。

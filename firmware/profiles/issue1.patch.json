@@ -1,0 +1,221 @@
+{
+  "source_sha256": "f1e6cedbe767c17fa6078c19cf856f955ee3703b46ce842d9abb879cd866d7f9",
+  "target_sha256": "1eb1908c7ebd7cf3388d703b4ffa86b88c30ed010ffd0f3b9ad5387c4226241c",
+  "payload_bytes": 491520,
+  "changed_bytes": 27,
+  "sectors": [
+    "0x11000",
+    "0x33000",
+    "0x37000",
+    "0x42000"
+  ],
+  "patches": [
+    {
+      "address": "0x37564",
+      "offset": "0x2f564",
+      "before": "0221",
+      "after": "0321",
+      "old": "movs r1, #2",
+      "new": "movs r1, #3",
+      "purpose": "隐藏Page5侧栏，保留原标志",
+      "reference_address": "0x37728"
+    },
+    {
+      "address": "0x375bc",
+      "offset": "0x2f5bc",
+      "before": "8c21",
+      "after": "0021",
+      "old": "movs r1, #0x8c",
+      "new": "movs r1, #0",
+      "purpose": "媒体容器x",
+      "reference_address": "0x37780"
+    },
+    {
+      "address": "0x375be",
+      "offset": "0x2f5be",
+      "before": "1422",
+      "after": "0022",
+      "old": "movs r2, #0x14",
+      "new": "movs r2, #0",
+      "purpose": "媒体容器y",
+      "reference_address": "0x37782"
+    },
+    {
+      "address": "0x375cc",
+      "offset": "0x2f5cc",
+      "before": "4ff4a071",
+      "after": "4ff4f071",
+      "old": "mov.w r1, #0x140",
+      "new": "mov.w r1, #0x1e0",
+      "purpose": "媒体容器宽",
+      "reference_address": "0x37790"
+    },
+    {
+      "address": "0x375d0",
+      "offset": "0x2f5d0",
+      "before": "4ff4a072",
+      "after": "4ff4b472",
+      "old": "mov.w r2, #0x140",
+      "new": "mov.w r2, #0x168",
+      "purpose": "媒体容器高",
+      "reference_address": "0x37794"
+    },
+    {
+      "address": "0x37684",
+      "offset": "0x2f684",
+      "before": "4ff4a071",
+      "after": "4ff4f071",
+      "old": "mov.w r1, #0x140",
+      "new": "mov.w r1, #0x1e0",
+      "purpose": "静态图片宽",
+      "reference_address": "0x37848"
+    },
+    {
+      "address": "0x37688",
+      "offset": "0x2f688",
+      "before": "4ff4a072",
+      "after": "4ff4b472",
+      "old": "mov.w r2, #0x140",
+      "new": "mov.w r2, #0x168",
+      "purpose": "静态图片高",
+      "reference_address": "0x3784c"
+    },
+    {
+      "address": "0x11930",
+      "offset": "0x9930",
+      "before": "42f20800",
+      "after": "44f20860",
+      "old": "movw r0, #0x2008",
+      "new": "movw r0, #0x4608",
+      "purpose": "共享缓冲分配低16",
+      "reference_address": "0x11928"
+    },
+    {
+      "address": "0x11934",
+      "offset": "0x9934",
+      "before": "c0f20300",
+      "after": "c0f20500",
+      "old": "movt r0, #3",
+      "new": "movt r0, #5",
+      "purpose": "共享缓冲分配高16",
+      "reference_address": "0x1192c"
+    },
+    {
+      "address": "0x11a38",
+      "offset": "0x9a38",
+      "before": "42f20800",
+      "after": "44f20860",
+      "old": "movw r0, #0x2008",
+      "new": "movw r0, #0x4608",
+      "purpose": "静态JPEG容量低16",
+      "reference_address": "0x11a38"
+    },
+    {
+      "address": "0x11a40",
+      "offset": "0x9a40",
+      "before": "c0f20300",
+      "after": "c0f20500",
+      "old": "movt r0, #3",
+      "new": "movt r0, #5",
+      "purpose": "静态JPEG容量高16",
+      "reference_address": "0x11a40"
+    },
+    {
+      "address": "0x33756",
+      "offset": "0x2b756",
+      "before": "42f2080a",
+      "after": "44f2086a",
+      "old": "movw sl, #0x2008",
+      "new": "movw sl, #0x4608",
+      "purpose": "GIF JPEG容量低16",
+      "reference_address": "0x33912"
+    },
+    {
+      "address": "0x3375e",
+      "offset": "0x2b75e",
+      "before": "c0f2030a",
+      "after": "c0f2050a",
+      "old": "movt sl, #3",
+      "new": "movt sl, #5",
+      "purpose": "GIF JPEG容量高16",
+      "reference_address": "0x3391a"
+    },
+    {
+      "address": "0x33812",
+      "offset": "0x2b812",
+      "before": "42f20805",
+      "after": "44f20865",
+      "old": "movw r5, #0x2008",
+      "new": "movw r5, #0x4608",
+      "purpose": "GIF RGB复制上限低16",
+      "reference_address": "0x339ce"
+    },
+    {
+      "address": "0x33818",
+      "offset": "0x2b818",
+      "before": "c0f20305",
+      "after": "c0f20505",
+      "old": "movt r5, #3",
+      "new": "movt r5, #5",
+      "purpose": "GIF RGB复制上限高16",
+      "reference_address": "0x339d4"
+    },
+    {
+      "address": "0x1199e",
+      "offset": "0x999e",
+      "before": "49f20406",
+      "after": "4af20436",
+      "old": "movw r6, #0x9004",
+      "new": "movw r6, #0xa304",
+      "purpose": "静态RGB像素阈值低16",
+      "reference_address": "0x11996"
+    },
+    {
+      "address": "0x119a6",
+      "offset": "0x99a6",
+      "before": "c0f20106",
+      "after": "c0f20206",
+      "old": "movt r6, #1",
+      "new": "movt r6, #2",
+      "purpose": "静态RGB像素阈值高16",
+      "reference_address": "0x1199e"
+    },
+    {
+      "address": "0x337f8",
+      "offset": "0x2b7f8",
+      "before": "49f20402",
+      "after": "4af20432",
+      "old": "movw r2, #0x9004",
+      "new": "movw r2, #0xa304",
+      "purpose": "GIF RGB像素阈值低16",
+      "reference_address": "0x339b4"
+    },
+    {
+      "address": "0x337fc",
+      "offset": "0x2b7fc",
+      "before": "c0f20102",
+      "after": "c0f20202",
+      "old": "movt r2, #1",
+      "new": "movt r2, #2",
+      "purpose": "GIF RGB像素阈值高16",
+      "reference_address": "0x339b8"
+    },
+    {
+      "address": "0x42f0d",
+      "offset": "0x3af0d",
+      "before": "40014001",
+      "after": "e0016801",
+      "purpose": "官方导入画布尺寸480x360",
+      "reference_address": "0x431b9"
+    }
+  ],
+  "dfu_suffix_prefix_hex": "ffff00104255000155464410",
+  "patched_payload_sha256": "7acdfe5aa0785d109800f8a8dc4f13986a55a9919347fc9a19297d3d3b39f665",
+  "immutable_payload_bytes": 487424,
+  "source_code_sha256": "74f2fa47a76206526ade19dc66c398fa18dbfecf779c008b4470cf63706a726b",
+  "target_code_sha256": "9093f898f29d212623eda58101fa05cdac5c99207e0f55f84c3df69f2712a52e",
+  "preserved_tail_bytes": 4096,
+  "profile": "issue-1-74f2fa47",
+  "validation": "offline-validated-awaiting-hardware",
+  "label": "Issue #1 构建"
+}

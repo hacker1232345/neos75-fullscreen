@@ -2,7 +2,7 @@
 // Standalone backup: no existing backup, ERASE, or flash-program command required.
 const fs=require('fs'),path=require('path'),crypto=require('crypto');
 const {openDfu,mk,kick,closeDfu,sleep,log}=require('./mcu_dfu');
-const {firmwareKind}=require('./firmware_image');
+const {firmwareInfo}=require('./firmware_image');
 const BASE=0x8000,LENGTH=491520;
 async function backupToFile(D,file,onProgress=()=>{}){
  if(fs.existsSync(file)||fs.existsSync(file+'.partial')||fs.existsSync(file+'.json'))throw Error('备份或临时文件已存在；请选择新文件名');
@@ -46,7 +46,7 @@ async function main(args){
  result.appReturned=false;
  if(!leaveError){const HID=require('node-hid');for(let i=0;i<30;i++){await sleep(200);try{if(HID.devices().some(d=>d.vendorId===0x5542&&d.productId===1)){result.appReturned=true;break;}}catch{}}}
  if(!result.appReturned)result.warning='备份完整，但尚未确认屏幕回到应用模式，请保留日志并检查连接。';
- result.firmwareKind=firmwareKind(fs.readFileSync(file));
+ Object.assign(result,firmwareInfo(fs.readFileSync(file)));
  fs.writeFileSync(file+'.json',JSON.stringify(result,null,2));
  console.log(JSON.stringify(result));return result;
 }

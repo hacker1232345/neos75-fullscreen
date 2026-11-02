@@ -1,0 +1,35 @@
+{
+  "profiles": [
+    {
+      "profile": "reference-66679ff2",
+      "validation": "hardware-verified",
+      "source_code_sha256": "66679ff2cb06ab5a5e47673f679e14e68bf2082fb6401b3808ca58d7f2e1a40c",
+      "target_code_sha256": "cdd6334d2917b2e08d86c7c44ac45706d6b8081bb0707a349b6c7b7e9749beab",
+      "target_full_sha256": "3c922e809dcfac1c35ad8f1f8caebcfc999bf6475a3e6fa22fd18c5d85a4f6e5",
+      "changed_bytes": 27,
+      "python_node_bytes_equal": true,
+      "force_keeps_correct_known_profile": true,
+      "already_fullscreen_recognized": true,
+      "tail_variant_preserved": true,
+      "corrupt_code_rejected": true,
+      "flash_erase_models_4KB_and_8KB": "PASS: 4KB/8KB erase models; plan has zero erase; exact full-bank target; verify; restore; interrupted write recovery; corrupt preflight rejects before erase"
+    },
+    {
+      "profile": "issue-1-74f2fa47",
+      "validation": "offline-validated-awaiting-hardware",
+      "source_code_sha256": "74f2fa47a76206526ade19dc66c398fa18dbfecf779c008b4470cf63706a726b",
+      "target_code_sha256": "9093f898f29d212623eda58101fa05cdac5c99207e0f55f84c3df69f2712a52e",
+      "target_full_sha256": "1eb1908c7ebd7cf3388d703b4ffa86b88c30ed010ffd0f3b9ad5387c4226241c",
+      "changed_bytes": 27,
+      "python_node_bytes_equal": true,
+      "force_keeps_correct_known_profile": true,
+      "already_fullscreen_recognized": true,
+      "tail_variant_preserved": true,
+      "corrupt_code_rejected": true,
+      "flash_erase_models_4KB_and_8KB": "PASS: 4KB/8KB erase models; plan has zero erase; exact full-bank target; verify; restore; interrupted write recovery; corrupt preflight rejects before erase"
+    }
+  ],
+  "real_device_written": false,
+  "issue1_real_display_validation": "pending",
+  "private_backups_published": false
+}

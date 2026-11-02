@@ -16,7 +16,7 @@ import zlib
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = '1.1.2'
+VERSION = '1.1.3'
 PROJECT = Path(sys._MEIPASS) / 'project' if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
 NODE = Path(sys._MEIPASS) / ('runtime/node.exe' if sys.platform == 'win32' else 'runtime/node') if getattr(sys, 'frozen', False) else Path(shutil.which('node') or 'node')
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
@@ -60,7 +60,7 @@ def generate(source, destination, overwrite=False, force=False):
     finally:
         if temp.exists():
             temp.unlink()
-    return {'output': str(dst), 'bytes': len(result), 'sha256': m['target_sha256'], 'changed_bytes': m['changed_bytes'], 'force': force}
+    return {'output': str(dst), 'bytes': len(result), 'sha256': m['target_sha256'], 'changed_bytes': m['changed_bytes'], 'force': force, 'profile': m['profile'], 'profileLabel': m['label'], 'validation': m['validation']}
 
 
 def node_run(script, args=(), baseline=None, on_line=None):
@@ -103,7 +103,7 @@ def maintain(mode, baseline, target, yes=False, on_line=None, force=False):
 
 def self_test(on_line=None):
     checks = {}
-    for label, script in [('mcu_transport', 'tools/test_mcu_transport.js'), ('backup', 'tools/test_mcu_backup.js'), ('wallpaper_protocol', 'wallpaper/selftest.js'), ('force_flash_model', 'tools/test_force_flash.js'),
+    for label, script in [('mcu_transport', 'tools/test_mcu_transport.js'), ('backup', 'tools/test_mcu_backup.js'), ('wallpaper_protocol', 'wallpaper/selftest.js'), ('force_flash_model', 'tools/test_force_flash.js'), ('automatic_profiles', 'tools/test_profiles.js'),
                           ('native_modules', 'desktop/native_check.js')]:
         checks[label] = node_run(script, on_line=on_line)
     try:
@@ -314,6 +314,21 @@ class App:
         p = filedialog.askopenfilename(parent=self.root, title=title, filetypes=[('文件', pattern), ('全部文件', '*.*')])
         if p:
             var.set(p)
+            if var is self.backup:
+                try:
+                    self.show_profile(builder().firmware_info(Path(p).read_bytes()))
+                except OSError as e:
+                    self.state.set('备份读取失败：' + str(e))
+
+    def show_profile(self, data):
+        label = data.get('profileLabel') or '未知构建'
+        if data['firmwareKind'] == 'supported-original':
+            validation = '已实机验收' if data.get('validation') == 'hardware-verified' else '离线适配 · 待实机验收'
+            self.state.set(f'{label} · {validation}')
+        elif data['firmwareKind'] == 'already-fullscreen':
+            self.state.set(f'{label} · 已是全屏版，无需重复升级')
+        else:
+            self.state.set('未知构建 · 未找到对应补丁配置')
 
     def append(self, text):
         self.log.configure(state='normal')
@@ -374,7 +389,14 @@ class App:
         if out:
             force = self.force.get()
             title = '生成全屏固件 · 无验证模式' if force else '生成全屏固件 · 标准验证'
-            self.run(title, lambda cb: generate(source, out, overwrite=True, force=force), lambda d: self.target.set(d['output']))
+            self.run(title, lambda cb: generate(source, out, overwrite=True, force=force), self.build_done)
+
+    def build_done(self, data):
+        self.target.set(data['output'])
+        if data.get('force'):
+            self.state.set(f"强制模式 · 使用{data['profileLabel']}配置 · 兼容性未验证")
+        else:
+            self.show_profile({'firmwareKind': 'supported-original', **data})
 
     def read_backup(self):
         out = filedialog.asksaveasfilename(parent=self.root, title='保存设备当前固件（请选择新文件名）', initialfile='neos75-backup.bin', defaultextension='.bin', filetypes=[('固件备份', '*.bin')])
@@ -389,11 +411,10 @@ class App:
 
     def backup_done(self, data):
         self.backup.set(data['file'])
+        self.show_profile(data)
         if data['firmwareKind'] == 'supported-original':
-            self.backup.set(data['file'])
-            self.state.set('备份完整 · 原版固件已匹配，可生成全屏补丁')
+            self.append('已按备份哈希自动选择对应补丁，无需勾选无验证模式。')
         elif data['firmwareKind'] == 'already-fullscreen':
-            self.state.set('备份完整 · 设备已是本项目全屏版，无需重复升级')
             messagebox.showinfo('设备已经全屏', '当前固件备份已保存。设备已是全屏版，无需再次生成或刷入补丁。', parent=self.root)
         else:
             self.state.set('备份完整 · 当前固件版本尚未适配')

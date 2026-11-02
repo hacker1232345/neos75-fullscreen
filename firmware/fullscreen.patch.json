@@ -194,5 +194,8 @@
   "immutable_payload_bytes": 487424,
   "source_code_sha256": "66679ff2cb06ab5a5e47673f679e14e68bf2082fb6401b3808ca58d7f2e1a40c",
   "target_code_sha256": "cdd6334d2917b2e08d86c7c44ac45706d6b8081bb0707a349b6c7b7e9749beab",
-  "preserved_tail_bytes": 4096
+  "preserved_tail_bytes": 4096,
+  "profile": "reference-66679ff2",
+  "label": "原验证构建",
+  "validation": "hardware-verified"
 }
