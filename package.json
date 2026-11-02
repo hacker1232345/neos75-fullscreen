@@ -1,0 +1,15 @@
+{
+  "name": "neos75-fullscreen",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AULA Neos75 480x360 fullscreen image and GIF patch tools",
+  "license": "MIT",
+  "scripts": {
+    "test": "node tools/test_mcu_transport.js && node wallpaper/selftest.js",
+    "test:device-image": "node tools/test_flash_live.js"
+  },
+  "dependencies": {
+    "node-hid": "3.4.0",
+    "usb": "3.2.1"
+  }
+}

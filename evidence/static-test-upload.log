@@ -1,0 +1,6 @@
+{
+  "reports": 212,
+  "acks": 4,
+  "displayVerified": false,
+  "tailAck": "原厂协议尾段无应答，尾段接收未确认"
+}

@@ -1,0 +1,46 @@
+{
+  "result": "PASS",
+  "layout_and_info_before_after": [
+    {
+      "position": [
+        140,
+        20
+      ],
+      "container_size": [
+        320,
+        320
+      ],
+      "static_size": [
+        320,
+        320
+      ],
+      "info_payload": "4255010040014001000001000000000000",
+      "sidebar_flags": 2
+    },
+    {
+      "position": [
+        0,
+        0
+      ],
+      "container_size": [
+        480,
+        360
+      ],
+      "static_size": [
+        480,
+        360
+      ],
+      "info_payload": "42550100e0016801000001000000000000",
+      "sidebar_flags": 3
+    }
+  ],
+  "capacity_pairs_executed": 6,
+  "exact_payload_changed_bytes": 27,
+  "changed_sectors": [
+    "0x11000",
+    "0x33000",
+    "0x37000",
+    "0x43000"
+  ],
+  "limits": "BL外部调用用桩；不模拟LCD、硬件JPEG解码、Flash或真实堆余量"
+}

@@ -1,0 +1,11 @@
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*
+.model-desk/
+/mcu-before-fullscreen.bin
+/tools/*.bin
+*.rollback.json
+*.zip

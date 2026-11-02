@@ -1,0 +1,12 @@
+{
+  "date": "2026-11-02",
+  "source": "user_reply_in_this_chat",
+  "answer": "图片和 GIF 都全屏正常",
+  "result": "PASS",
+  "scope": "本机图片及GIF全屏显示",
+  "unverified": [
+    "长GIF帧率",
+    "复杂素材",
+    "断电保留"
+  ]
+}
