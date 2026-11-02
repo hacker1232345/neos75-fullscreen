@@ -1,0 +1,152 @@
+[
+  {
+    "id": "clock_big",
+    "label": "超大时钟",
+    "desc": "当前时间 HH:MM:SS，占满整格的大号数字",
+    "group": "时间",
+    "default": true,
+    "minWidth": 220,
+    "minHeight": 96,
+    "draw": "draw_clock_big"
+  },
+  {
+    "id": "date",
+    "label": "日期",
+    "desc": "当天日期 yyyy-MM-dd",
+    "group": "时间",
+    "default": true,
+    "minWidth": 150,
+    "minHeight": 44,
+    "draw": "draw_date"
+  },
+  {
+    "id": "cpu",
+    "label": "CPU",
+    "desc": "CPU 总占用率 + 主频 + 横向进度条",
+    "group": "性能",
+    "default": true,
+    "minWidth": 150,
+    "minHeight": 84,
+    "draw": "draw_cpu"
+  },
+  {
+    "id": "mem",
+    "label": "内存",
+    "desc": "内存占用率 + 已用/总量 GB",
+    "group": "性能",
+    "default": true,
+    "minWidth": 150,
+    "minHeight": 84,
+    "draw": "draw_mem"
+  },
+  {
+    "id": "gpu",
+    "label": "GPU",
+    "desc": "GPU 引擎占用率（GPU Engine 计数器），无数据画 n/a",
+    "group": "性能",
+    "default": false,
+    "minWidth": 120,
+    "minHeight": 72,
+    "draw": "draw_gpu"
+  },
+  {
+    "id": "temp",
+    "label": "温度",
+    "desc": "ACPI 热区温度 °C，读不到画 n/a",
+    "group": "性能",
+    "default": true,
+    "minWidth": 120,
+    "minHeight": 72,
+    "draw": "draw_temp"
+  },
+  {
+    "id": "history_cpu",
+    "label": "CPU 历史",
+    "desc": "最近 60 条 CPU/内存采样折线（依赖 --state-dir）",
+    "group": "性能",
+    "default": false,
+    "minWidth": 220,
+    "minHeight": 96,
+    "draw": "draw_history_cpu"
+  },
+  {
+    "id": "top_proc",
+    "label": "最占进程",
+    "desc": "累计 CPU 时间最高的进程名与占比",
+    "group": "性能",
+    "default": false,
+    "minWidth": 200,
+    "minHeight": 84,
+    "draw": "draw_top_proc"
+  },
+  {
+    "id": "disk",
+    "label": "磁盘剩余",
+    "desc": "所有本地固定盘剩余空间合计 GB",
+    "group": "存储",
+    "default": true,
+    "minWidth": 150,
+    "minHeight": 72,
+    "draw": "draw_disk"
+  },
+  {
+    "id": "net",
+    "label": "网络速率",
+    "desc": "下行 / 上行 Mbps",
+    "group": "网络",
+    "default": true,
+    "minWidth": 170,
+    "minHeight": 72,
+    "draw": "draw_net"
+  },
+  {
+    "id": "ip",
+    "label": "IP 地址",
+    "desc": "默认网关所在网卡的 IPv4",
+    "group": "网络",
+    "default": false,
+    "minWidth": 180,
+    "minHeight": 44,
+    "draw": "draw_ip"
+  },
+  {
+    "id": "host",
+    "label": "主机名",
+    "desc": "计算机名",
+    "group": "系统",
+    "default": false,
+    "minWidth": 150,
+    "minHeight": 44,
+    "draw": "draw_host"
+  },
+  {
+    "id": "battery",
+    "label": "电池",
+    "desc": "电量百分比 + 充电/供电状态，台式机画 AC",
+    "group": "电源",
+    "default": true,
+    "minWidth": 200,
+    "minHeight": 84,
+    "draw": "draw_battery"
+  },
+  {
+    "id": "volume",
+    "label": "音量",
+    "desc": "系统主音量百分比（CoreAudio），失败画 n/a",
+    "group": "电源",
+    "default": false,
+    "minWidth": 130,
+    "minHeight": 72,
+    "draw": "draw_volume"
+  },
+  {
+    "id": "uptime",
+    "label": "运行时长",
+    "desc": "自开机以来的时长",
+    "group": "系统",
+    "default": true,
+    "minWidth": 130,
+    "minHeight": 56,
+    "draw": "draw_uptime"
+  }
+]

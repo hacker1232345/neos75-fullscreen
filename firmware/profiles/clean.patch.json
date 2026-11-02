@@ -1,0 +1,73 @@
+{
+  "profile": "clean-8465dd63",
+  "label": "全屏+清爽增强",
+  "state": "enhanced",
+  "parent": "reference-66679ff2",
+  "source_sha256": "d01bf64752e80ef8f5878acd6207d6d7277d4a850c551856eed0301daa6aed57",
+  "source_code_sha256": "cdd6334d2917b2e08d86c7c44ac45706d6b8081bb0707a349b6c7b7e9749beab",
+  "target_code_sha256": "8465dd6334eb0dc0d0862477b5df05c5d957b1bfe3d19ba1ad222fd3397ef4b7",
+  "patched_payload_sha256": "23914e766410b3ab652623e3be189b8dce366fa8e3856ccc498cf1dff34dccd9",
+  "payload_bytes": 491520,
+  "immutable_payload_bytes": 487424,
+  "preserved_tail_bytes": 4096,
+  "changed_bytes": 13,
+  "sectors": [
+    "0x34000",
+    "0x3e000"
+  ],
+  "dfu_suffix_prefix_hex": "ffff00104255000155464410",
+  "patches": [
+    {
+      "address": "0x3453c",
+      "offset": "0x2c53c",
+      "before": "f2f72cf9",
+      "after": "00bf00bf",
+      "old": "bl 0x26798 → nop;nop",
+      "new": "保持旧画面可见，新帧到达即自然替换",
+      "purpose": "上传开始时不再隐藏全屏图片对象（F）"
+    },
+    {
+      "address": "0x345aa",
+      "offset": "0x2c5aa",
+      "before": "09f06bff",
+      "after": "00bf00bf",
+      "old": "bl 0x3E484 → nop;nop",
+      "new": "不再画 242×242 圆弧进度环",
+      "purpose": "跳过进度环绘制调用（A）"
+    },
+    {
+      "address": "0x345cf",
+      "offset": "0x2c5cf",
+      "before": "f6b831",
+      "after": "f2dc51",
+      "old": "movw r1,#0x0BB8(3000ms) → #0x05DC(1500ms)",
+      "new": "收尾门控 3s→1.5s，刷新从约33s降到3~4s",
+      "purpose": "上传收尾阈值（G）"
+    },
+    {
+      "address": "0x3e54a",
+      "offset": "0x3654a",
+      "before": "ff",
+      "after": "00",
+      "old": "movs r1,#0xFF → #0x00",
+      "new": "初始化即隐藏进度环容器",
+      "purpose": "覆盖层容器初始可见性（C）"
+    },
+    {
+      "address": "0x3e69c",
+      "offset": "0x3669c",
+      "before": "30",
+      "after": "00",
+      "old": "\"0%\n\" → \"\u0000%\n\"",
+      "new": "去掉中央残留的 0% 文本",
+      "purpose": "覆盖层标签初值串（D）"
+    }
+  ],
+  "validation": "hardware-verified",
+  "validationNote": "真机刷入并逐字节回验一致；圆环/中央0%/上传黑屏三项症状消除；刷新实测 3~4 秒",
+  "features": [
+    "fullscreen",
+    "no-upload-ring",
+    "instant-refresh"
+  ]
+}
