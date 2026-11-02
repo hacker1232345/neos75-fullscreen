@@ -69,4 +69,4 @@ jobs:
       - name: Publish executables
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release/* --title "Neos75 全屏工具 $GITHUB_REF_NAME" --notes-file docs/release-v1.1.1.md
+        run: gh release create "$GITHUB_REF_NAME" release/* --title "Neos75 全屏工具 $GITHUB_REF_NAME" --notes-file docs/release-${GITHUB_REF_NAME}.md

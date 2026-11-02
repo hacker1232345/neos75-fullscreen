@@ -16,7 +16,7 @@ import zlib
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = '1.1.1'
+VERSION = '1.1.2'
 PROJECT = Path(sys._MEIPASS) / 'project' if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
 NODE = Path(sys._MEIPASS) / ('runtime/node.exe' if sys.platform == 'win32' else 'runtime/node') if getattr(sys, 'frozen', False) else Path(shutil.which('node') or 'node')
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
@@ -30,20 +30,20 @@ def builder():
     return mod
 
 
-def validate_firmware(baseline, target):
+def validate_firmware(baseline, target, force=False):
     source = Path(baseline).read_bytes()
     image = Path(target).read_bytes()
-    expected, m = builder().patch(source)
+    expected, m = builder().patch(source, force=force)
     if image != expected:
         raise ValueError('目标固件与当前备份生成结果不匹配（含配置和DFU校验）。未连接设备。')
     return m
 
 
-def generate(source, destination, overwrite=False):
+def generate(source, destination, overwrite=False, force=False):
     src, dst = Path(source).resolve(), Path(destination).resolve()
     if src == dst:
         raise ValueError('输出不能覆盖原始备份，请选择其他文件名。')
-    result, m = builder().patch(src.read_bytes())
+    result, m = builder().patch(src.read_bytes(), force=force)
     if dst.exists() and not overwrite:
         raise ValueError('输出文件已存在，请选择新文件名或明确允许覆盖。')
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -60,7 +60,7 @@ def generate(source, destination, overwrite=False):
     finally:
         if temp.exists():
             temp.unlink()
-    return {'output': str(dst), 'bytes': len(result), 'sha256': m['target_sha256'], 'changed_bytes': m['changed_bytes']}
+    return {'output': str(dst), 'bytes': len(result), 'sha256': m['target_sha256'], 'changed_bytes': m['changed_bytes'], 'force': force}
 
 
 def node_run(script, args=(), baseline=None, on_line=None):
@@ -87,21 +87,23 @@ def node_run(script, args=(), baseline=None, on_line=None):
     return text
 
 
-def maintain(mode, baseline, target, yes=False, on_line=None):
+def maintain(mode, baseline, target, yes=False, on_line=None, force=False):
     if mode not in ['plan', 'verify', 'flash', 'restore']:
         raise ValueError('未知维护操作')
     if mode in ['flash', 'restore'] and not yes:
         raise ValueError('刷写或恢复需要明确确认，未连接设备。')
-    validate_firmware(baseline, target)
+    validate_firmware(baseline, target, force=force)
     args = [mode, str(Path(target).resolve()), str(Path(baseline).resolve())]
     if yes:
         args.append('--yes')
+    if force:
+        args.append('--force')
     return node_run('tools/mcu_flash_live.js', args, baseline=baseline, on_line=on_line)
 
 
 def self_test(on_line=None):
     checks = {}
-    for label, script in [('mcu_transport', 'tools/test_mcu_transport.js'), ('backup', 'tools/test_mcu_backup.js'), ('wallpaper_protocol', 'wallpaper/selftest.js'),
+    for label, script in [('mcu_transport', 'tools/test_mcu_transport.js'), ('backup', 'tools/test_mcu_backup.js'), ('wallpaper_protocol', 'wallpaper/selftest.js'), ('force_flash_model', 'tools/test_force_flash.js'),
                           ('native_modules', 'desktop/native_check.js')]:
         checks[label] = node_run(script, on_line=on_line)
     try:
@@ -136,15 +138,26 @@ def cli(argv):
     parser.add_argument('--target')
     parser.add_argument('--overwrite', action='store_true')
     parser.add_argument('--yes', action='store_true')
+    parser.add_argument('--force', action='store_true', help='无验证，直接打补丁：跳过版本哈希与补丁旧字节检查')
     parser.add_argument('--result-file')
     args = parser.parse_args(argv)
     code = 0
     try:
+        if args.force and not (args.build or args.maintain):
+            raise ValueError('--force仅用于生成全屏固件或固件维护')
         if args.gui_smoke:
             app = App()
             app.root.update()
+            options = [b for b in app.buttons if isinstance(b, ttk.Checkbutton)]
+            assert len(options) == 2 and not app.force.get()
+            assert all(b.cget('text') == '无验证，直接打补丁' for b in options)
+            options[0].invoke()
+            app.root.update()
+            assert app.force.get() and options[1].instate(['selected'])
+            options[1].invoke()
+            assert not app.force.get()
             app.root.destroy()
-            data = {'result': 'PASS', 'gui': 'created and updated', 'device_write': False}
+            data = {'result': 'PASS', 'gui': 'created and updated; force defaults off; both tabs share selection', 'device_write': False}
         elif args.self_test:
             data = self_test()
         elif args.backup:
@@ -154,7 +167,7 @@ def cli(argv):
         elif args.build:
             if not args.out:
                 raise ValueError('--build需要--out')
-            data = generate(args.build, args.out, args.overwrite)
+            data = generate(args.build, args.out, args.overwrite, force=args.force)
         elif args.status:
             data = json.loads(node_run('wallpaper/screen_wallpaper.js', ['status']))
         elif args.jpeg_plan:
@@ -170,7 +183,7 @@ def cli(argv):
         else:
             if not args.baseline or not args.target:
                 raise ValueError('维护需要--baseline和--target')
-            data = {'log': maintain(args.maintain, args.baseline, args.target, args.yes)}
+            data = {'log': maintain(args.maintain, args.baseline, args.target, args.yes, force=args.force), 'force': args.force}
         data = {'ok': True, **data}
     except Exception as e:
         code, data = 1, {'ok': False, 'error': str(e)}
@@ -198,6 +211,7 @@ class App:
         self.backup = tk.StringVar()
         self.target = tk.StringVar()
         self.jpeg = tk.StringVar()
+        self.force = tk.BooleanVar(value=False)
         self.state = tk.StringVar(value='未查询设备')
         self.progress_text = tk.StringVar(value='就绪 · 启动不会连接或修改设备')
         self.draw()
@@ -245,6 +259,7 @@ class App:
         patch.pack(fill='x')
         ttk.Label(patch, text='没有备份？先从设备读取。程序双读校验并保存，再判断版本是否支持。', wraplength=790).pack(anchor='w', pady=(0, 8))
         self.path_row(patch, '原始备份', self.backup, lambda: self.choose(self.backup, '选择原始MCU备份', '*.bin'))
+        self.force_option(patch)
         backup_row = ttk.Frame(patch)
         backup_row.pack(fill='x', pady=(10, 0))
         self.button(backup_row, '从设备读取备份…', self.read_backup, style='Primary.TButton').pack(side='left', padx=(0, 8))
@@ -263,9 +278,10 @@ class App:
         ttk.Label(media, text='GIF的全屏效果由固件补丁提供，GIF导入请使用官方程序。\n发送会替换当前壁纸；尾段无最终应答，发送后需看屏确认。', wraplength=800, foreground='#475569').pack(anchor='w')
         box = ttk.LabelFrame(maintenance, text='仅在确需维护时操作')
         box.pack(fill='x')
-        ttk.Label(box, text='这组操作会进入DFU。刷写和恢复会修改固件，请保持USB连接。\n已正常全屏显示的设备无需重复刷写；仅支持本项目验证过的版本。', wraplength=790).pack(anchor='w', pady=(0, 8))
+        ttk.Label(box, text='这组操作会进入DFU。刷写和恢复会修改固件，请保持USB连接。\n默认仅接受验证过的版本；强制模式使用下方选项。', wraplength=790).pack(anchor='w', pady=(0, 8))
         self.path_row(box, '原始备份', self.backup, lambda: self.choose(self.backup, '选择原始MCU备份', '*.bin'))
         self.path_row(box, '全屏固件', self.target, lambda: self.choose(self.target, '选择已生成的全屏固件', '*.bin'))
+        self.force_option(box)
         row = ttk.Frame(box)
         row.pack(fill='x', pady=(12, 0))
         for text, mode in [('预检（进入DFU）', 'plan'), ('回读校验', 'verify'), ('刷入全屏…', 'flash'), ('恢复原版…', 'restore')]:
@@ -280,6 +296,12 @@ class App:
         self.log = tk.Text(body, height=7, font=('Consolas', 10), background='#FFFFFF', foreground='#171717', relief='solid', borderwidth=1, wrap='word', state='disabled')
         self.log.pack(fill='x')
         ttk.Label(body, text=f'v{VERSION} · 原始备份与输出文件由你选择，本程序不内置设备完整转储。', foreground='#475569').pack(anchor='w', pady=(8, 0))
+
+    def force_option(self, parent):
+        option = ttk.Checkbutton(parent, text='无验证，直接打补丁', variable=self.force)
+        option.pack(anchor='w', pady=(8, 0))
+        self.buttons.append(option)
+        ttk.Label(parent, text='跳过版本哈希和补丁旧字节检查，按固定地址打补丁；不保证兼容。原始备份和写后回验仍保留。', wraplength=760, foreground='#9A3412').pack(anchor='w', pady=(4, 0))
 
     def path_row(self, parent, label, var, action):
         row = ttk.Frame(parent)
@@ -350,7 +372,9 @@ class App:
             return
         out = filedialog.asksaveasfilename(parent=self.root, title='保存全屏固件', initialfile='mcu-fullscreen-live-v1.bin', defaultextension='.bin', filetypes=[('固件', '*.bin')])
         if out:
-            self.run('生成全屏固件', lambda cb: generate(source, out, overwrite=True), lambda d: self.target.set(d['output']))
+            force = self.force.get()
+            title = '生成全屏固件 · 无验证模式' if force else '生成全屏固件 · 标准验证'
+            self.run(title, lambda cb: generate(source, out, overwrite=True, force=force), lambda d: self.target.set(d['output']))
 
     def read_backup(self):
         out = filedialog.asksaveasfilename(parent=self.root, title='保存设备当前固件（请选择新文件名）', initialfile='neos75-backup.bin', defaultextension='.bin', filetypes=[('固件备份', '*.bin')])
@@ -364,6 +388,7 @@ class App:
         self.run('读取设备备份', lambda cb: json.loads(node_run('tools/mcu_backup.js', [out, '--yes'], on_line=cb).splitlines()[-1]), self.backup_done)
 
     def backup_done(self, data):
+        self.backup.set(data['file'])
         if data['firmwareKind'] == 'supported-original':
             self.backup.set(data['file'])
             self.state.set('备份完整 · 原版固件已匹配，可生成全屏补丁')
@@ -372,7 +397,7 @@ class App:
             messagebox.showinfo('设备已经全屏', '当前固件备份已保存。设备已是全屏版，无需再次生成或刷入补丁。', parent=self.root)
         else:
             self.state.set('备份完整 · 当前固件版本尚未适配')
-            messagebox.showinfo('当前版本尚未适配', '完整备份已保存，但与目前验证的版本不匹配，程序不会生成或刷写补丁。请保留备份与校验记录。', parent=self.root)
+            messagebox.showinfo('当前版本尚未适配', '完整备份已保存并选中，受校验区域与目前验证的版本不匹配。默认模式会拒绝生成或刷写；如需强制尝试，可勾选“无验证，直接打补丁”。请保留备份与校验记录。', parent=self.root)
         if data.get('warning'):
             messagebox.showwarning('连接状态需检查', data['warning'], parent=self.root)
 
@@ -397,18 +422,22 @@ class App:
 
     def firmware(self, mode):
         backup, target = self.backup.get(), self.target.get()
+        force = self.force.get()
         try:
-            validate_firmware(backup, target)
+            validate_firmware(backup, target, force=force)
         except Exception as e:
             messagebox.showerror('文件未就绪', str(e), parent=self.root)
             return
         labels = {'plan': '预检', 'verify': '回读校验', 'flash': '刷入全屏固件', 'restore': '恢复原版'}
         question = labels[mode] + '会进入DFU。'
+        if force:
+            question += '\n当前为“无验证，直接打补丁”模式，不保证此固件兼容。'
         if mode in ['flash', 'restore']:
             question += '\n将擦写四个8KB保护组，请勿断电或拔线。'
         question += '\n\n确认执行？'
         if messagebox.askyesno(labels[mode], question, parent=self.root, default='no'):
-            self.run(labels[mode], lambda cb: maintain(mode, backup, target, yes=True, on_line=cb))
+            title = labels[mode] + (' · 无验证模式' if force else ' · 标准验证')
+            self.run(title, lambda cb: maintain(mode, backup, target, yes=True, on_line=cb, force=force))
 
     def leave(self):
         if messagebox.askyesno('退出DFU', '请确认刷写或恢复已全部回验通过。\n\n现在退出DFU并回到应用？', parent=self.root, default='no'):
