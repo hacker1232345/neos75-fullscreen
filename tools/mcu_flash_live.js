@@ -1,7 +1,7 @@
 'use strict';
 const fs=require('fs'),path=require('path'),crypto=require('crypto');
 const {openDfu,mk,kick,closeDfu,sleep,log}=require('./mcu_dfu');
-const backupPath=path.join(__dirname,'..','mcu-before-fullscreen.bin');
+const backupPath=process.env.NEOS75_BASELINE||path.join(__dirname,'..','mcu-before-fullscreen.bin');
 const baseline=fs.readFileSync(backupPath);
 if(crypto.createHash('sha256').update(baseline).digest('hex')!=='c69c38b02841c533db44e8b058a6b86d4a0e816d2bb6ce95cd2b1d5d6927016d')throw Error('现场备份SHA256不符');
 const official=Buffer.concat([baseline,Buffer.alloc(16)]);

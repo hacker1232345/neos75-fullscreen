@@ -7,7 +7,7 @@ async function scenario(eraseSize,injectFail=false,badPreflight=false){
  const D={toIdle:async()=>{},read:async(a,n)=>{reads++;return Buffer.from(flash.subarray(a-0x8000,a-0x8000+n));},erase:async(a)=>{const start=Math.floor(a/eraseSize)*eraseSize-0x8000;flash.fill(255,start,start+eraseSize);erases++;erased.push(start);},writeBlocks:async(a,blocks)=>{for(let i=0;i<blocks.length;i++){if(fault&&i===1){fault=false;throw Error('injected write failure');}blocks[i].copy(flash,a-0x8000+4096*i);writes++;}}};
  const fakeFs={...fs,existsSync:()=>false,writeFileSync:()=>{}};
  const fakeRequire=x=>x==='./mcu_dfu'?{openDfu:async()=>({}),mk:()=>D,closeDfu:()=>closed++,sleep:async()=>{},log:()=>{}}:x==='fs'?fakeFs:require(x);
- const mod={exports:{}};const proc={argv:[]};vm.runInNewContext(code,{require:fakeRequire,module:mod,__dirname:dir,process:proc,Buffer,console});
+ const mod={exports:{}};const proc={argv:[],env:{}};vm.runInNewContext(code,{require:fakeRequire,module:mod,__dirname:dir,process:proc,Buffer,console});
  const run=async mode=>{proc.argv=['node','mcu_flash_live.js',mode,targetFile,path.join(dir,'../mcu-before-fullscreen.bin'),'--yes'];return mod.exports.main();};
  await run('plan').catch(e=>{if(!badPreflight)throw e;});assert.equal(erases,0);
  if(badPreflight){await assert.rejects(run('flash'));assert.equal(erases,0);return;}

@@ -189,5 +189,6 @@
       "purpose": "官方导入画布尺寸480x360"
     }
   ],
-  "dfu_suffix_prefix_hex": "ffff00104255000155464410"
+  "dfu_suffix_prefix_hex": "ffff00104255000155464410",
+  "patched_payload_sha256": "9ad685629e4f75841f17141cea1f1105aacc12808a587d0977784ca0a4ac917c"
 }

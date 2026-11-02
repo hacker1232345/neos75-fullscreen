@@ -1,0 +1,72 @@
+name: Build desktop applications
+on:
+  push:
+    tags: ['v1.1.*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            name: Windows-x64
+          - os: macos-15
+            name: macOS-arm64
+          - os: macos-15-intel
+            name: macOS-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install build dependencies
+        run: |
+          npm ci --ignore-scripts
+          python -m pip install pyinstaller==6.22.2
+      - name: Test source without a USB device
+        run: |
+          npm test
+          python -m unittest discover -s tests -v
+      - name: Build native application
+        run: python desktop/build_exe.py
+      - name: Test packaged runtime and GUI
+        run: python desktop/ci_smoke.py
+      - name: Package downloads
+        shell: bash
+        run: |
+          mkdir -p release
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            ditto -c -k --keepParent dist/Neos75-Fullscreen.app release/Neos75-${{ matrix.name }}.zip
+          else
+            cp dist/Neos75-Fullscreen.exe release/Neos75-${{ matrix.name }}.exe
+          fi
+          cp dist/Neos75-Fullscreen.sha256.json release/Neos75-${{ matrix.name }}.build.json
+          python -c "from pathlib import Path;import hashlib; ps=sorted(Path('release').glob('*'));Path('release/Neos75-${{ matrix.name }}.sha256').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\\n' for p in ps))"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Neos75-${{ matrix.name }}
+          path: release/*
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Publish executables
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --title "Neos75 全屏工具 $GITHUB_REF_NAME" --notes-file docs/release-v1.1.0.md

@@ -6,6 +6,12 @@
 
 上图是生成的验收素材，非屏幕实拍。实机确认见 [验收记录](evidence/user-acceptance.json)。
 
+## 下载可执行程序
+
+[Windows / Apple 芯片 Mac / Intel Mac 下载](https://github.com/hacker1232345/neos75-fullscreen/releases/latest)。程序内置运行环境；Mac版支持macOS 15+，USB/DFU尚未在Mac真机验证。
+
+没有原始备份时，在程序中点“从设备读取备份”；双读校验完成后自动判断是否适配。未知版本仅保存，不生成或刷写。详见 [可执行程序说明](docs/desktop-release.md)。
+
 ## 日常使用
 
 已经刷入本补丁的设备，重新连接官方程序后，在第5页导入原图片或GIF即可。旧320×320转换素材需重新导入。非480×360原图的缩放/裁切由官方程序控制。
