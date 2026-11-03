@@ -24,6 +24,7 @@ v1.2.0 在原有全屏补丁之上加了一层可选的**屏幕部件**：把电
 | --- | --- | --- | --- | --- |
 | 第一层 | `firmware/fullscreen.patch.json` | 原版 `66679ff2` → 全屏 `cdd6334d` | 27 字节 | 实机验收 |
 | 第二层 | `firmware/profiles/clean.patch.json` | 全屏 `cdd6334d` → 全屏+清爽 `8465dd63` | 13 字节 | 实机刷入并逐字节回验 |
+| 第三层 | `firmware/profiles/widget.patch.json` | 全屏+清爽 `8465dd63` → 覆盖组件 `dce6dce7` | 2369 字节 | 实机刷入并逐扇区回验 |
 | 另一条链 | `firmware/profiles/issue1.patch.json` | 原版2 `74f2fa47` → 全屏2 `9093f898` | 27 字节 | 离线通过，待实机验收 |
 
 一个「原版」备份会自动连打两层到链末；如果设备已经在第一层，程序识别为 `upgradeable` 并**只补剩余那层**。第二层只改13个字节：
@@ -37,6 +38,26 @@ v1.2.0 在原有全屏补丁之上加了一层可选的**屏幕部件**：把电
 | `0x3e69c` | `0x3669c` | `30` → `00` | 覆盖层标签初值串 `"0%\n"` 清空 |
 
 第二层触及的两个4KB扇区是 `0x34000`、`0x3e000`。
+
+第三层（任意页覆盖组件）**不碰页表，也不碰原厂任何一个页面的处理函数**（`page_table_untouched` / `vendor_enter_untouched` 由构建器断言）。它只做三件事：把命令表 `0x35316` 的 2 字节改指自己的接收器、往代码区空闲带 `0x4aacc` 放一段代码、把默认页掩码写进数据区。触及 `0x35000`、`0x4a000`、`0x4b000` 三个扇区。
+
+## 任意页覆盖组件（文字直写）
+
+`dashboard/` 那条路是把画面渲染成 JPEG 走官方上传通道；这条路是把**四行文字直接写进键盘内存**——不擦 Flash、不进 DFU、不占用上传队列，所以刷新能压到两三秒一次。
+
+```sh
+node tools/push_widget.js probe                  # 只读：当前页有没有装好组件
+node tools/push_widget.js mask 1,2,3,4,5,6       # 哪些页面显示文字（写 RAM）
+node tools/push_widget.js rows "CPU 40%|RAM 85%|BAT 78%|22:30:32"
+node tools/push_widget.js loop                   # 常驻，从 stdin 逐行读 {"rows":[...]}
+python dashboard/native_rows.py --list           # 哪些部件能写成文字
+```
+
+- 每屏独立缓冲：六个页面可以各自显示不同内容。
+- 未选中的页面保持官方原样，图片和 GIF 不受影响。
+- 只支持 ASCII `0x20`–`0x7e`；中文会被替换成空格。四行、每行最多 47 字符。
+- 应答 `FE` 接受 / `FD` 该页尚未初始化（翻过去就好）/ `FC` 无效帧。
+- 取不到的传感器写 `n/a`，不编造数字。
 
 ## 屏幕部件（可选显示）
 
@@ -68,7 +89,10 @@ node   dashboard/push.js loop  --preset default --interval 3000
 
 已经刷入本补丁的设备，重新连接官方程序后，在第5页导入原图片或GIF即可。旧320×320转换素材需重新导入。非480×360原图的缩放/裁切由官方程序控制。
 
-要显示电脑状态，用桌面程序的「屏幕部件」页，或直接跑上面的 `push.js`。同一时刻只能有一个上传者，连续推送前请关闭官方程序的上传任务。
+要显示电脑状态，有两种方式：
+
+1. **图片方式**：桌面程序的「屏幕部件」页，或直接跑上面的 `push.js`。同一时刻只能有一个上传者，连续推送前请关闭官方程序的上传任务。
+2. **文字方式**：桌面程序「小组件」页底部的「直接写进键盘内存的四行文字」面板。不需要关闭官方程序，也不影响已有的图片和 GIF。
 
 ## 内容
 
@@ -78,7 +102,9 @@ node   dashboard/push.js loop  --preset default --interval 3000
 - `tools/build_fullscreen.py`：纯Python标准库生成器；按哈希识别镜像所处层，自动连打剩余层，并保留自己的末尾4KB数据。
 - `tools/mcu_dfu.js`、`mcu_flash_live.js`：MCU DFU传输及带备份/回验的本机专用刷写工具。
 - `wallpaper/`：官方壁纸协议的JPEG上传工具和差分测试。GIF全屏由补丁支持，日常GIF导入使用官方程序；本JPEG工具不提供通用GIF转换。
-- `dashboard/`：屏幕部件模块（采样、渲染、推送、离线自测）。
+- `dashboard/`：屏幕部件模块（采样、渲染、推送、离线自测）；`dashboard/native_rows.py` 把采样状态折成四行 ASCII。
+- `tools/native_widget.js`、`tools/push_widget.js`：原生文字通道（协议编解码、命令行、常驻 loop）。
+- `tools/build_widget.py`：覆盖组件固件的构建器；纯标准库，自带 THUMB-2 长跳编码器。
 - `examples/`：480×360边框图和两帧GIF。
 - `evidence/`、`docs/`：实机回验、仿真结果、验收及纠错复盘。
 

@@ -5,3 +5,17 @@
 /* Fit the primary controls in the default desktop window. */
 .display-choice{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:8px 0;font-size:11px;color:var(--muted)}.display-choice .secondary{padding:8px 12px;min-height:44px;font-size:12px}.screen-navigation{margin-top:14px;padding-top:12px}.screen-navigation summary{font-size:12px;cursor:pointer}.search-row{display:flex;align-items:flex-start;gap:8px;margin-top:8px}.search-row input{flex:1;min-width:0}.search-row button{white-space:nowrap}#data-dialog label{font-size:13px;font-weight:600}#codex-thread{display:block;width:100%;padding:13px;border:1px solid #d1ddeb;border-radius:12px;margin-top:8px;background:#fff;font:inherit;font-size:13px}.city-results{display:grid;gap:8px}.city-results button{text-align:left;white-space:normal;overflow-wrap:anywhere;min-height:44px}#city-status,#codex-error{min-height:1.5em}#data-dialog .hint{font-size:12px}#display-mode{font-variant-numeric:tabular-nums}
 .shell{padding-top:22px}.tabs{margin-top:22px;margin-bottom:16px}.preview-case{max-width:400px}#fullscreen h1{font-size:34px}.row-actions .icon-button{width:44px;min-width:44px}.widget-heading{padding-top:10px}
+
+.native-panel{margin-top:26px;padding:20px 22px;border-radius:22px}
+.native-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.native-heading h2{font-size:16px;margin:4px 0 0}
+.native-pages{border:0;padding:0;margin:16px 0 0}
+.native-pages legend{font-size:12px;font-weight:650;color:#526c8c;letter-spacing:1px;margin-bottom:8px}
+.native-pages #native-pages{display:flex;flex-wrap:wrap;gap:8px}
+.native-pages button{border-radius:16px;border:1px solid #c8d6e6;background:#fff;padding:0 14px;min-height:36px;font-size:13px}
+.native-pages button.selected{border-color:#0068d9;background:#e8f1ff;color:#0068d9;font-weight:650}
+.native-surface{margin:14px 0 4px;padding:12px 14px;background:#101722;border-radius:14px;color:#c6f0cd;font-family:ui-monospace,Consolas,monospace;font-size:13px;line-height:1.75;min-height:104px;overflow:hidden}
+.native-surface span{display:block;white-space:pre;overflow:hidden;text-overflow:ellipsis}
+.native-surface span.empty{color:#4a5a6b}
+.native-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+.native-actions button{flex:1 1 auto;min-width:120px}

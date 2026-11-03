@@ -43,6 +43,14 @@
           <p class="sensor-note">预览使用本机数据。温度等传感器无法读取时显示 n/a。</p>
         </div>
       </div>
+      <div class="native-panel glass" id="native-panel">
+        <div class="native-heading"><div><p class="eyebrow">文字组件</p><h2>直接写进键盘内存的四行文字</h2></div><button class="icon-button" id="native-refresh" aria-label="刷新文字画面">↻</button></div>
+        <p class="hint" id="native-note">这条通道不擦写固件、不需要上传图片，所以能把刷新做到两三秒一次。每屏固定四行，只接受英文、数字和常见符号；中文会显示成空格。</p>
+        <fieldset class="native-pages"><legend>显示在哪些界面</legend><div id="native-pages"></div><p class="hint">选中的界面会被组件覆盖，没选的界面保持官方原样。</p></fieldset>
+        <div class="native-surface" id="native-preview" role="status" aria-live="polite" aria-label="四行文字预览"></div>
+        <div class="interval-row"><label for="native-interval">文字刷新间隔</label><select id="native-interval"><option value="2">2 秒</option><option value="3">3 秒</option><option value="5">5 秒</option><option value="10">10 秒</option></select></div>
+        <div class="native-actions"><button class="secondary" id="native-check">检查设备</button><button class="secondary" id="native-apply">应用界面选择</button><button class="primary" id="native-send">发送一帧</button><button class="secondary" id="native-stream">连续发送</button></div>
+      </div>
     </section>
     <div class="status" id="status" role="status" aria-live="polite"><div class="status-icon" id="status-icon" aria-hidden="true">·</div><div><strong id="status-title">准备就绪</strong><p id="status-message">连接键盘后即可开始。</p><progress id="progress" max="100" value="0" hidden aria-label="补丁进度"></progress></div></div>
   </main>

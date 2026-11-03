@@ -283,6 +283,117 @@ def push_once(mode='once', on_line=None, timeout=None, **kw):
     return text
 
 
+def native_probe(timeout=6, on_line=None):
+    """只查原生组件在当前页是否就绪（读 RAM，不写入）。"""
+    script = _project() / 'tools' / 'push_widget.js'
+    if not script.exists():
+        raise DashboardError('tools/push_widget.js 尚未提供。')
+    text = _run([_node_path(), str(script), 'probe'], env=native_env(), timeout=timeout)
+    if on_line:
+        on_line(text.strip())
+    try:
+        return json.loads(text.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        raise DashboardError('原生组件探测没有返回可解析结果：%s' % text.strip()) from None
+
+
+def native_env():
+    """原生文字组件通道需要的环境（NODE_PATH + 清理继承来的 Node 变量）。"""
+    env = push_env()
+    env.pop('PYTHONIOENCODING', None)
+    env.pop('PYTHONUTF8', None)
+    return env
+
+
+def native_frame(rows, mask=None):
+    """把四行 ASCII 与可选页掩码编成 push_widget.js loop 读的一行 JSON。
+
+    rows=None 表示这一行只写页掩码，不改动当前显示的文字。
+    """
+    payload = {}
+    if rows is not None:
+        if not isinstance(rows, list) or len(rows) != 4:
+            raise DashboardError('原生组件需要正好四行文字。')
+        payload['rows'] = [str(r) for r in rows]
+    if mask is not None:
+        if isinstance(mask, bool) or not isinstance(mask, int) or not 1 <= mask <= 0x3f:
+            raise DashboardError('页掩码必须是 1..0x3f 的整数。')
+        payload['mask'] = mask
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def native_popen(on_line=None):
+    """以长驻子进程打开原生文字通道，返回 Popen。
+
+    子进程从 stdin 逐行读 {"rows": [...], "mask": n}，每读到一行就写一次 RAM。
+    这条通道不擦 Flash、不进 DFU，也不占用 JPEG/GIF 上传队列。
+    """
+    script = _project() / 'tools' / 'push_widget.js'
+    if not script.exists():
+        raise DashboardError('tools/push_widget.js 尚未提供。')
+    p = subprocess.Popen([_node_path(), str(script), 'loop'], cwd=str(_project()),
+                         env=native_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace',
+                         creationflags=NO_WINDOW, bufsize=0)
+    return p
+
+
+def native_mask(mask, timeout=20, on_line=None):
+    """只写页掩码：决定哪些界面显示文字组件（写 RAM，不写 Flash）。"""
+    if isinstance(mask, bool) or not isinstance(mask, int) or not 1 <= mask <= 0x3f:
+        raise DashboardError('页掩码必须是 1..0x3f 的整数。')
+    return native_once(None, mask=mask, timeout=timeout, on_line=on_line, frames_only=False)
+
+
+def native_close(process, timeout=3):
+    """关掉常驻原生通道：先结束 stdin，再等它自己退出。"""
+    if process is None:
+        return None
+    try:
+        if process.stdin and not process.stdin.closed:
+            process.stdin.close()
+    except OSError:
+        pass
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+    return process.returncode
+
+
+def native_once(rows, mask=None, timeout=20, on_line=None, frames_only=True):
+    """推一帧就退出：把同一个 loop 通道喂一行然后结束 stdin。"""
+    p = native_popen()
+    try:
+        out, err = p.communicate(native_frame(rows, mask) + "\n", timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.communicate()
+        raise DashboardError('原生组件写入超时，设备无应答。') from None
+    if on_line:
+        for line in (out or '').splitlines():
+            on_line(line)
+        for line in (err or '').splitlines():
+            if line.strip():
+                on_line(line)
+    frames = masks = 0
+    for line in (out or '').splitlines():
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        if value.get('error'):
+            raise DashboardError('原生组件写入失败：%s' % value['error'])
+        if value.get('frame'):
+            frames += 1
+        elif value.get('mask'):
+            masks += 1
+    if frames_only and not frames:
+        raise DashboardError('原生组件没有任何应答：%s' % ((err or '').strip().splitlines() or [''])[-1])
+    return {'frames': frames, 'masks': masks, 'displayVerified': False}
+
+
 def push_popen(mode='loop', on_line=None, **kw):
     """以长驻子进程启动连续推送（loop），返回 Popen；调用方负责 terminate。"""
     script = _project() / 'dashboard' / 'push.js'

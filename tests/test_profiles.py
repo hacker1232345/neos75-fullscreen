@@ -139,8 +139,8 @@ class ChainProfiles(unittest.TestCase):
 class CatalogConsistency(unittest.TestCase):
     def test_catalog_shape(self):
         profiles=b.manifests()
-        self.assertEqual(len(profiles),3)
-        self.assertEqual(len({m['profile'] for m in profiles}),3)
+        self.assertEqual(len(profiles),4)
+        self.assertEqual(len({m['profile'] for m in profiles}),4)
         for m in profiles:
             changes=set()
             for p in m['patches']:
@@ -162,7 +162,7 @@ class CatalogConsistency(unittest.TestCase):
         self.assertEqual(clean['parent'],ref['profile'])
         self.assertNotEqual(clean['target_code_sha256'],ref['target_code_sha256'])
         hashes=[m[k] for m in profiles.values() for k in ['source_code_sha256','target_code_sha256']]
-        self.assertEqual(len(set(hashes)),5)
+        self.assertEqual(len(set(hashes)),6)
         # clean 层不得与 reference 层改动同一个字节
         ref_bytes={off(p)+i for p in ref['patches'] for i in range(len(raw(p,'before')))}
         clean_bytes={off(p)+i for p in clean['patches'] for i in range(len(raw(p,'before')))}

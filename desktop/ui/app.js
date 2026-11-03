@@ -3,6 +3,7 @@ const $ = id => document.getElementById(id);
 const symbols = {clock_big:'◷',date:'▦',cpu:'⌘',mem:'▥',gpu:'▧',temp:'°',history_cpu:'⌁',top_proc:'≡',disk:'▰',net:'⇵',ip:'⌗',host:'▣',battery:'▱',volume:'♪',uptime:'◴'};
 const descriptions = {clock_big:'清晰的大号数字时钟',date:'今天的日期',cpu:'处理器使用率与主频',mem:'内存使用率与容量',gpu:'显卡使用率，无法读取时显示 n/a',temp:'系统提供的温度，无法读取时显示 n/a',history_cpu:'最近 60 次 CPU 使用率变化',top_proc:'累计 CPU 用时最多的进程',disk:'可用磁盘空间',net:'当前下载与上传速度',ip:'电脑当前 IPv4 地址',host:'这台电脑的名称',battery:'笔记本电量与供电状态',volume:'系统音量，无法读取时显示 n/a',uptime:'电脑从开机到现在的运行时间'};
 let api, registry, config, state = {}, previews = [], page = 0, displayPage = null, revision = -1, ready = false, pending = false, timer, confirmAction;
+let nativeInfo = {supported: [], unsupported: [], rows: ['', '', '', ''], omitted: [], ready: null}, nativeText = ['', '', '', ''];
 symbols.weather='☀'; symbols.codex='⌁';
 descriptions.weather='所选城市的温度与天气，10 分钟更新，断网标记缓存';
 descriptions.codex='本机 Codex 任务事件状态与更新时间，不显示聊天正文';
@@ -34,11 +35,57 @@ function paint() { const busy=!!state.busy; $('connection-label').textContent = 
   $('display-mode').textContent=displayPage===null?'自动轮播':`固定第 ${displayPage+1} 页`;
   $('pin-page').setAttribute('aria-pressed',String(displayPage===page));
   if($('catalog').open) $('catalog-list').querySelectorAll('button').forEach(b=>{b.disabled=busy||b.textContent==='已添加';});
+  paintNative(busy);
 }
 let polling=false;
-async function poll() { if(!ready || polling) return; polling=true; try { const r=await api.snapshot(revision); state=r.state; displayPage=r.displayPage??null; if(r.previews) { previews=r.previews; revision=r.revision; updatePreview(); } paint(); } catch(e) { $('status-title').textContent='连接程序失败'; $('status-message').textContent='请关闭窗口后重新打开程序。'; } finally { polling=false; } }
+async function poll() { if(!ready || polling) return; polling=true; try { const r=await api.snapshot(revision); state=r.state; displayPage=r.displayPage??null; if(r.text) nativeText=r.text; if(r.previews) { previews=r.previews; revision=r.revision; updatePreview(); } paint(); } catch(e) { $('status-title').textContent='连接程序失败'; $('status-message').textContent='请关闭窗口后重新打开程序。'; } finally { polling=false; } }
 function confirm(title,copy,button,fn) { $('confirm-title').textContent=title; $('confirm-copy').textContent=copy; $('confirm-action').textContent=button; confirmAction=fn; openDialog('confirmation'); }
-async function boot(bridge) { if(ready) return; api=bridge; const data=await api.bootstrap(); registry=data.registry; config=data.config; ready=true; $('version').textContent=`v${data.version}`; $('backup-path').textContent=data.backupDirectory; renderList(); renderCatalog(); await poll(); setInterval(poll,700); }
+function nativePages() { return config.native_pages || []; }
+function paintNative(busy) {
+  const picked = new Set(nativePages());
+  const holder = $('native-pages');
+  if(holder.childElementCount !== 6) {
+    holder.replaceChildren();
+    for(let i = 1; i <= 6; i++) {
+      const b = el('button', '', `第 ${i} 屏`);
+      b.dataset.page = String(i);
+      b.type = 'button';
+      b.onclick = async () => {
+        const next = new Set(nativePages());
+        if(next.has(i)) next.delete(i); else next.add(i);
+        await save({...config, native_pages: [...next].sort((a,b)=>a-b)});
+      };
+      holder.append(b);
+    }
+  }
+  for(const b of holder.querySelectorAll('button')) {
+    const on = picked.has(Number(b.dataset.page));
+    b.classList.toggle('selected', on);
+    b.setAttribute('aria-pressed', String(on));
+    b.disabled = busy;
+  }
+  const lines = nativeText.concat(['', '', '', '']).slice(0, 4);
+  const surface = $('native-preview');
+  surface.replaceChildren();
+  for(const text of lines) {
+    const span = el('span', text ? '' : 'empty', text || '（空行）');
+    surface.append(span);
+  }
+  const counting = config.widgets.filter(id => nativeInfo.supported.includes(id)).length;
+  const graphed = config.widgets.filter(id => !nativeInfo.supported.includes(id));
+  $('native-note').textContent = graphed.length
+    ? `当前 ${config.widgets.length} 个组件里，${graphed.length} 个无法写成文字（折线图只能画、不能写），其余 ${counting} 个会排进四行。中文和 emoji 会被替换成空格。`
+    : '这条通道不擦写固件、不需要上传图片，所以能把刷新做到两三秒一次。每屏固定四行，只接受英文、数字和常见符号。';
+  $('native-interval').value = String(config.native_interval ?? 3);
+  $('native-interval').disabled = busy;
+  for(const id of ['native-refresh','native-check','native-apply']) $(id).disabled = busy;
+  const running = state.kind === 'native-stream';
+  $('native-send').disabled = busy || !config.widgets.length;
+  $('native-stream').disabled = running ? false : (busy || !nativePages().length || !config.widgets.length);
+  $('native-stream').textContent = running ? '停止连续发送' : '连续发送';
+}
+async function refreshNative() { const r = await call('native_preview'); if(!r.ok) toast(r.message || '未生成文字画面'); await poll(); }
+async function boot(bridge) { if(ready) return; api=bridge; const data=await api.bootstrap(); registry=data.registry; config=data.config; if(data.native) nativeInfo={...nativeInfo,...data.native}; ready=true; $('version').textContent=`v${data.version}`; $('backup-path').textContent=data.backupDirectory; renderList(); renderCatalog(); await poll(); setInterval(poll,700); }
 $('tab-fullscreen').onclick=()=>showTab('fullscreen'); $('tab-widgets').onclick=()=>showTab('widgets');
 $('connect').onclick=async()=>{const r=await call('connect');if(!r.ok)toast(r.message);await poll();};
 $('patch').onclick=()=>{const force=$('force').checked; confirm(force?'无验证应用补丁':'应用全屏补丁',force?'将跳过版本与旧字节检查。固定偏移可能不兼容，并有导致屏幕无法启动的风险。仍然继续？':'程序会先保存这把键盘的完整备份，再自动匹配固件、应用补丁并回验。已是全屏版本则直接跳过；未知版本会停止。部分适配配置尚待实机验收。','备份并应用',()=>call('patch',true,force));};
@@ -57,6 +104,12 @@ for(const direction of ['previous','next']) $('screen-'+direction).onclick=async
 $('data-settings').onclick=()=>{$('codex-thread').value=config.codex_thread||'';openDialog('data-dialog');$('city-query').focus();};
 $('city-form').onsubmit=async e=>{e.preventDefault();$('city-search').disabled=true;$('city-status').textContent='正在搜索城市…';$('city-results').replaceChildren();try{const r=await call('search_city',$('city-query').value);$('city-status').textContent=r.ok?(r.cities.length?'请选择城市':'没有找到城市，可尝试拼音或添加地区名'):r.message||'搜索失败';for(const city of r.cities||[]){const button=el('button','secondary',city.label);button.type='button';button.onclick=async()=>{await save({...config,weather:city});$('city-status').textContent=config.weather?.label===city.label?'城市已保存':'城市未保存，请先停止当前操作';};$('city-results').append(button);}}finally{$('city-search').disabled=!!state.busy;}};
 $('codex-form').onsubmit=async e=>{e.preventDefault();const thread=$('codex-thread').value.trim();if(thread&&!/^[a-zA-Z0-9_-]{8,80}$/.test(thread)){$('codex-error').textContent='请输入有效任务 ID，或留空自动跟随。';$('codex-thread').focus();return;}await save({...config,codex_thread:thread});$('codex-error').textContent=config.codex_thread===thread?'任务选择已保存':'未保存，请先停止当前操作';};
+$('native-refresh').onclick=refreshNative;
+$('native-check').onclick=async()=>{const r=await call('native_probe');if(!r.ok)toast(r.message);await poll();};
+$('native-apply').onclick=async()=>{const r=await call('native_pages');if(!r.ok)toast(r.message);await poll();};
+$('native-send').onclick=async()=>{const r=await call('native_push');if(!r.ok)toast(r.message);await poll();};
+$('native-stream').onclick=async()=>{ if(state.kind==='native-stream') {await call('stop');await poll();return;} const r=await call('native_start');if(!r.ok)toast(r.message);await poll();};
+$('native-interval').onchange=async e=>save({...config,native_interval:Number(e.target.value)});
 $('sync').onclick=async()=>{if(state.kind==='stream') {await call('stop');await poll();} else confirm('开始同步小组件','当前屏幕图片会被替换为组件画面。多页组件会依次轮播；请先关闭官方程序的上传任务。','开始同步',async()=>{const r=await call('start');await poll();return r;});};
 $('backup-settings').onclick=()=>openDialog('settings'); $('open-backups').onclick=()=>call('open_backups');
 $('restore').onclick=()=>{ $('settings').close(); confirm('恢复最近一次备份','请连接上次应用补丁的同一把键盘。程序会检查现场固件，再恢复该次应用前的备份。','检查并恢复',()=>call('restore',true));};

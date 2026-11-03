@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -116,7 +117,12 @@ class GlassWorkflow(unittest.TestCase):
         desired = {'widgets':['mem','cpu','clock_big'], 'interval':3}
         self.assertTrue(self.api.configure(desired)['ok'])
         other = Api(self.temp.name, self.core, sampler=self.sampler)
-        self.assertEqual(other.bootstrap()['config'], desired)
+        saved = other.bootstrap()['config']
+        # Persistence round-trips the chosen widgets and interval; the native-channel
+        # keys keep their defaults because this configuration never set them.
+        self.assertEqual({k: saved[k] for k in ('widgets', 'interval')}, desired)
+        self.assertEqual(saved['native_pages'], [])
+        self.assertEqual(saved['native_interval'], 3)
         for ids in [['wrong'], ['cpu','cpu'], 'cpu']:
             self.assertFalse(other.configure({'widgets': ids})['ok'])
         self.assertTrue(other.configure({'widgets':[]})['ok'])
@@ -217,6 +223,92 @@ class GlassWorkflow(unittest.TestCase):
         self.assertTrue(self.api.screen_page('previous', True)['ok'])
         self.wait()
         self.assertEqual(self.core.node_run.call_args.args, ('wallpaper/pages.js', ['previous', '--yes']))
+
+    # --- the native text channel: RAM only, never Flash, never DFU -----------
+
+    def test_native_pages_must_be_a_unique_subset_of_six(self):
+        base = dict(widgets=['cpu'])
+        self.assertTrue(self.api.configure(dict(base, native_pages=[2, 4, 6]))['ok'])
+        for bad in ([0], [7], [1, 1], [-1], ['2'], None if False else [1, 'x']):
+            self.assertFalse(self.api.configure(dict(base, native_pages=bad))['ok'], bad)
+        self.assertTrue(self.api.configure(dict(base, native_pages=[]))['ok'])
+        for bad in (0, 1, 4, 60, 'x'):
+            self.assertFalse(self.api.configure(dict(base, native_interval=bad))['ok'], bad)
+
+    def test_native_preview_folds_the_selected_widgets_without_usb(self):
+        self.assertTrue(self.api.configure({'widgets': ['clock_big', 'cpu', 'mem', 'history_cpu']})['ok'])
+        self.api.native_preview()
+        self.wait()
+        rows = self.api.snapshot()['text']
+        self.assertEqual(len(rows), 4)
+        self.assertIn('CPU', ' '.join(rows))
+        self.assertTrue(any('12:34:56' in row for row in rows))
+        self.assertFalse(self.api.snapshot()['state']['native'])
+        self.core.node_run.assert_not_called()
+        self.core.dash.return_value.native_once.assert_not_called()
+
+    def test_native_mask_request_refused_before_usb_access(self):
+        self.assertTrue(self.api.configure({'widgets': ['cpu']})['ok'])
+        self.assertFalse(self.api.native_pages()['ok'])
+        self.api.native_start()
+        self.wait()
+        self.assertEqual(self.api.snapshot()['state']['phase'], 'error')
+        self.core.dash.return_value.native_popen.assert_not_called()
+
+    def test_native_pages_writes_only_the_mask(self):
+        self.assertTrue(self.api.configure({'widgets': ['cpu'], 'native_pages': [2, 4, 6]})['ok'])
+        self.core.dash.return_value.native_mask.return_value = {'masks': 1, 'displayVerified': False}
+        self.assertTrue(self.api.native_pages()['ok'])
+        self.wait()
+        self.assertEqual(self.core.dash.return_value.native_mask.call_args.args, (0b0101010,))
+        self.assertEqual(self.api.snapshot()['state']['nativeSent'], 1)
+        self.core.dash.return_value.native_once.assert_not_called()
+
+    def test_native_push_sends_four_rows_and_never_rewrites_the_mask(self):
+        self.assertTrue(self.api.configure({'widgets': ['cpu'], 'native_pages': [3]})['ok'])
+        self.core.dash.return_value.native_once.return_value = {'frames': 1, 'masks': 0, 'displayVerified': False}
+        self.assertTrue(self.api.native_push()['ok'])
+        self.wait()
+        rows = self.core.dash.return_value.native_once.call_args.args[0]
+        self.assertEqual(len(rows), 4)
+        # A fixed frame must not carry a mask: that would retarget pages behind the user's back.
+        self.assertNotIn('mask', self.core.dash.return_value.native_once.call_args.kwargs)
+        self.assertEqual(self.api.snapshot()['state']['nativeSent'], 1)
+
+    def test_native_stream_reopens_the_channel_and_survives_rejected_frames(self):
+        self.assertTrue(self.api.configure({'widgets': ['cpu'], 'native_pages': [1, 2]})['ok'])
+        replies = [{'ok': True}, {'error': '该页尚未初始化'}, {'ok': True}]
+
+        def write(process, payload):
+            # The channel opens with the mask, then keeps sending four rows.
+            if 'rows' in payload:
+                self.assertEqual(len(payload['rows']), 4)
+            else:
+                self.assertEqual(payload, {'mask': 0b11})
+            return replies.pop(0) if replies else {'ok': True}
+
+        def fake_popen():
+            return Mock(stdin=Mock(), stdout=Mock())
+
+        self.core.dash.return_value.native_popen.side_effect = fake_popen
+        # Pace the loop by hand so the test does not sit through the real interval.
+        def pace(seconds):
+            time.sleep(0.02)
+            return False
+        patch_stop = patch.object(self.api._stop, 'wait', side_effect=pace)
+        with patch.object(self.api, '_write_native', side_effect=write), patch_stop:
+            self.assertTrue(self.api.native_start()['ok'])
+            for _ in range(100):
+                if self.api.snapshot()['state']['nativeSent'] >= 2:
+                    break
+                time.sleep(0.02)
+            self.assertEqual(self.api.snapshot()['state']['nativeSent'], 2)
+            self.assertEqual(self.api.snapshot()['state']['phase'], 'native')
+            self.api.stop()
+            self.wait()
+        self.core.dash.return_value.native_close.assert_called_once()
+        self.assertEqual(self.api.snapshot()['state']['phase'], 'idle')
+        self.assertFalse(self.api.snapshot()['state']['native'])
 
 
 if __name__ == '__main__':

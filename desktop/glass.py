@@ -42,6 +42,14 @@ def load_renderer():
     return module
 
 
+def load_native_rows():
+    """原生文字通道的行构造器（与 dashboard 共用同一份 widgets.json）。"""
+    spec = importlib.util.spec_from_file_location('neos75_native_rows', core.PROJECT / 'dashboard/native_rows.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def atomic_json(path, value):
     temp = path.with_suffix('.tmp')
     temp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -161,7 +169,14 @@ class Api:
         self._preview = []
         self._revision = 0
         self._registry = self._renderer.registry_json()
-        self._config = {'widgets': list(self._registry['presets']['minimal']), 'interval': 5}
+        self._rows = load_native_rows()
+        self._config = {'widgets': list(self._registry['presets']['minimal']), 'interval': 5,
+                        'native_pages': [], 'native_interval': 3}
+        self._native = {'ready': None, 'rows': ['', '', '', ''], 'omitted': [],
+                        'supported': [w['id'] for w in self._registry['widgets']
+                                      if w['id'] in self._rows.TEXT_WIDGETS],
+                        'unsupported': [w['id'] for w in self._registry['widgets']
+                                        if w['id'] not in self._rows.TEXT_WIDGETS]}
         self._last = None
         try:
             config = json.loads((self._dir / 'settings.json').read_text(encoding='utf-8'))
@@ -179,7 +194,28 @@ class Api:
         self._state = dict(busy=False, kind=None, phase='idle', title='准备就绪',
                            message='连接键盘后即可开始。', progress=0, connected=False,
                            connection='未检测', stream=False, sent=0, restore=bool(self._last),
-                           backup=None, error=False)
+                           backup=None, error=False, native=False, nativeSent=0,
+                           nativeReady=None)
+
+    @staticmethod
+    def _page_selection(pages):
+        """原生组件的页面选择：1..6，允许为空（表示不启用原生组件）。"""
+        if not isinstance(pages, list):
+            raise ValueError('原生组件页面无效：应为页面列表。')
+        cleaned = []
+        for value in pages:
+            if type(value) is not int or not 1 <= value <= 6:
+                raise ValueError('原生组件页面无效：请选择 1 到 6 之间的界面。')
+            if value in cleaned:
+                raise ValueError('原生组件页面不能重复。')
+            cleaned.append(value)
+        return sorted(cleaned)
+
+    @staticmethod
+    def _native_interval(value):
+        if value not in (2, 3, 5, 10):
+            raise ValueError('原生组件刷新间隔无效。')
+        return value
 
     def _validate(self, config):
         ids = config['widgets']
@@ -191,7 +227,9 @@ class Api:
         interval = config.get('interval', 5)
         if interval not in (3, 5, 10):
             raise ValueError('刷新间隔无效。')
-        valid = {'widgets': ids, 'interval': interval}
+        valid = {'widgets': ids, 'interval': interval,
+                 'native_pages': self._page_selection(config.get('native_pages', [])),
+                 'native_interval': self._native_interval(config.get('native_interval', 3))}
         if 'weather' in config:
             valid['weather'] = location(config['weather'])
         if 'codex_thread' in config:
@@ -221,6 +259,8 @@ class Api:
                 return {'ok': False, 'message': '请等待当前操作结束，或先停止小组件。'}
             self._state.update(busy=True, kind=kind, error=False, phase='working', progress=0)
             self._stop.clear()
+            if kind not in ('native-stream',):
+                self._state['native'] = False
             def run():
                 try:
                     fn()
@@ -229,6 +269,8 @@ class Api:
                     self._event(phase='error', title='操作未完成', error=True,
                                 message=self._friendly(exc))
                 finally:
+                    with self._mutex:
+                        self._native_process = None
                     self._event(busy=False, stream=False, kind=None)
             self._thread = threading.Thread(target=run, daemon=True)
             self._thread.start()
@@ -243,13 +285,18 @@ class Api:
         return '操作已停止。请打开诊断查看原因；如写入曾经开始，请保留 USB 连接并使用备份恢复。'
 
     def bootstrap(self):
+        with self._mutex:
+            native = copy.deepcopy(self._native)
         return dict(version=self._core.VERSION, registry=self._registry,
                     config=copy.deepcopy(self._config), backupDirectory=str(self._dir / 'backups'),
+                    native=native,
+                    nativeNote='文字组件直接写入键盘内存：每屏四行、只支持英文与数字，中文会显示为空。',
                     sensorNote='温度、GPU、音量取决于系统数据源；不可用时显示 n/a。')
 
     def snapshot(self, revision=-1):
         with self._mutex:
-            data = dict(state=copy.deepcopy(self._state), revision=self._revision, displayPage=self._display_page)
+            data = dict(state=copy.deepcopy(self._state), revision=self._revision, displayPage=self._display_page,
+                        text=list(self._native['rows']))
             if revision != self._revision:
                 data['previews'] = list(self._preview)
             return data
@@ -307,6 +354,156 @@ class Api:
         state = self._sampler.read()
         state.update(self._sources.read(self._config['widgets'], self._config))
         return state
+
+    def _native_rows(self, state=None):
+        """把当前组件选择折成四行 ASCII；未选的组件不会出现在屏幕上。"""
+        state = state if state is not None else self._read_state()
+        rows, omitted = self._rows.rows_from_state(state, self._config['widgets'])
+        with self._mutex:
+            self._native.update(rows=rows, omitted=omitted)
+        return rows, omitted
+
+    def native_preview(self):
+        """只在这台电脑上生成四行文字，不向键盘发送任何字节。"""
+        def work():
+            self._event(title='正在生成文字画面', message='只读取电脑状态，不向键盘发送。')
+            rows, omitted = self._native_rows()
+            self._event(title='文字画面已生成',
+                        message=('有 %d 个组件无法写成文字，已略过。' % len(omitted)) if omitted
+                        else '四行文字已按选择的组件生成。')
+        return self._job('native-preview', work)
+
+    def native_probe(self):
+        """读一次设备的原生组件状态（只读 RAM，不写 Flash、不进 DFU）。"""
+        def work():
+            self._event(title='正在检查原生组件', message='读取键盘当前界面状态。')
+            bridge = self._core.dash()
+            if not hasattr(bridge, 'native_probe'):
+                raise ValueError('原生组件通道不可用，请更新程序。')
+            info = bridge.native_probe()
+            ready = bool(info.get('ready'))
+            with self._mutex:
+                self._native['ready'] = ready
+            if ready:
+                self._event(nativeReady=True, title='原生组件已就绪',
+                            message='当前界面可以接收文字，直接同步即可。', phase='idle')
+            else:
+                self._event(nativeReady=False, title='当前界面还没有组件',
+                            message='这个界面尚未初始化：先切到已选中的界面，再同步一次即可。', phase='idle')
+        return self._job('native-probe', work)
+
+    def native_pages(self):
+        """把「显示在哪些界面」写进键盘（写 RAM，不写 Flash）。"""
+        mask = self._native_mask()
+        pages = self._config.get('native_pages') or []
+        if not mask:
+            return {'ok': False, 'message': '请先选择原生组件显示在哪些界面。'}
+        def work():
+            self._event(title='正在应用界面选择', message='第 %s 屏将显示文字组件。'
+                        % '、'.join(str(p) for p in pages), phase='native')
+            bridge = self._core.dash()
+            result = bridge.native_mask(mask, on_line=self._line)
+            self._event(native=True, nativeSent=result.get('masks', 0), title='界面选择已应用',
+                        message='已写入键盘内存：第 %s 屏。翻到这些界面即可看到文字。'
+                                % '、'.join(str(p) for p in pages), phase='done')
+        return self._job('native-pages', work)
+
+    def native_push(self):
+        """采样 → 四行文字 → 推一帧到键盘当前界面。"""
+        def work():
+            self._event(title='正在发送文字画面', message='文字直接写入键盘内存，不擦除固件。', phase='native')
+            rows, _ = self._native_rows()
+            bridge = self._core.dash()
+            result = bridge.native_once(rows, on_line=self._line)
+            self._event(native=True, nativeSent=result.get('frames', 0), connected=True,
+                        connection='USB 已连接', title='文字画面已发送',
+                        message='键盘已确认收到，请看屏确认。', phase='done')
+        return self._job('native-push', work)
+
+    def _native_mask(self):
+        pages = self._config.get('native_pages') or []
+        if not pages:
+            return None
+        mask = 0
+        for page in pages:
+            mask |= 1 << (page - 1)
+        return mask
+
+    def native_start(self):
+        if not self._config['widgets']:
+            return {'ok': False, 'message': '请先添加至少一个组件。'}
+        def work():
+            bridge = self._core.dash()
+            mask = self._native_mask()
+            pages = self._config.get('native_pages') or []
+            if not mask:
+                raise ValueError('请先选择原生组件显示在哪些界面。')
+            self._event(native=True, nativeSent=0, phase='native', title='正在打开文字通道',
+                        message='第 %s 屏会显示文字组件。' % '、'.join(str(p) for p in pages))
+            process = bridge.native_popen()
+            self._native_process = process
+            try:
+                self._write_native(process, {'mask': mask})
+                self._line('原生组件已启用：第 %s 屏' % '、'.join(str(p) for p in pages))
+                sent = 0
+                interval = self._config.get('native_interval', 3)
+                while not self._stop.is_set():
+                    begun = time.monotonic()
+                    rows, omitted = self._native_rows()
+                    reply = self._write_native(process, {'rows': rows})
+                    if reply.get('error'):
+                        # The device rejects frames on a page that has not been initialised;
+                        # keep the channel open so it starts working once the user turns there.
+                        self._line('这一帧未被接受：%s' % reply['error'])
+                        self._event(title='等待切到已选中的界面',
+                                    message='当前界面没有原生组件：翻到第 %s 屏后会自动开始显示。'
+                                            % '、'.join(str(p) for p in pages))
+                        self._stop.wait(max(0.2, interval - (time.monotonic() - begun)))
+                        continue
+                    sent += 1
+                    self._event(nativeSent=sent, connected=True, connection='USB 已连接',
+                                title='正在同步文字组件',
+                                message=('已发送 %d 帧 · 有 %d 个组件无法写成文字' % (sent, len(omitted)))
+                                if omitted else '已发送 %d 帧，请看屏确认。' % sent)
+                    self._stop.wait(max(0.2, interval - (time.monotonic() - begun)))
+            finally:
+                self._native_process = None
+                bridge.native_close(process)
+                self._line('原生组件通道已关闭。')
+            self._event(native=False, title='文字同步已停止',
+                        message='键盘保留最后收到的四行文字。', phase='idle')
+        return self._job('native-stream', work)
+
+    def _write_native(self, process, payload):
+        """向常驻通道写一行并读回一行应答；超时即视为设备不再应答。"""
+        line = json.dumps(payload, ensure_ascii=False) + '\n'
+        process.stdin.write(line)
+        process.stdin.flush()
+        deadline = time.monotonic() + 8
+        while True:
+            reply = process.stdout.readline()
+            if not reply:
+                raise ValueError('原生组件通道已断开，请重新连接键盘。')
+            try:
+                value = json.loads(reply)
+            except ValueError:
+                self._line(reply.strip())
+                if time.monotonic() > deadline:
+                    raise ValueError('原生组件没有应答。') from None
+                continue
+            return value
+
+    def stop(self):
+        with self._mutex:
+            if self._state['kind'] == 'native-stream':
+                self._stop.set()
+                self._event(title='正在停止文字同步', message='等待当前帧写入结束。')
+                return {'ok': True}
+            if self._state['kind'] != 'stream':
+                return {'ok': False, 'message': '当前没有组件同步任务。'}
+            self._stop.set()
+            self._event(title='正在停止同步', message='等待当前图片发送结束后停止。')
+        return {'ok': True}
 
     def _make_frames(self, state):
         ids = list(self._config['widgets'])
@@ -416,14 +613,6 @@ class Api:
             self._event(title='同步已停止', message='键盘保留最后发送的画面。', phase='idle')
         return self._job('stream', work)
 
-    def stop(self):
-        with self._mutex:
-            if self._state['kind'] != 'stream':
-                return {'ok': False, 'message': '当前没有组件同步任务。'}
-            self._stop.set()
-            self._event(title='正在停止同步', message='等待当前图片发送结束后停止。')
-        return {'ok': True}
-
     def open_backups(self):
         folder = self._dir / 'backups'
         folder.mkdir(exist_ok=True)
@@ -487,6 +676,16 @@ def run(smoke=False):
                                              widgets=['weather', 'codex'])[0]
                 if not extra.startswith(b'\xff\xd8'):
                     result['error'] = 'weather/Codex widgets did not render'
+                # The native text channel must render its four rows without touching USB.
+                buttons = window.evaluate_js("document.querySelectorAll('#native-pages button').length")
+                if buttons != 6:
+                    result['error'] = 'native page chooser not rendered'
+                rows = api.native_preview() and [api._thread.join(6), api.snapshot().get('text')][1]
+                if not rows or len(rows) != 4:
+                    result['error'] = 'native text rows not generated'
+                text = window.evaluate_js("document.querySelectorAll('#native-preview span').length")
+                if text != 4:
+                    result['error'] = 'native text preview not rendered'
         except Exception as exc:
             result['error'] = str(exc)
         finally:
