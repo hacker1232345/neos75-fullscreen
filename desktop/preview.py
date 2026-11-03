@@ -47,7 +47,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(b'{}', code=413)
         args = json.loads(self.rfile.read(length))
         method = self.path.removeprefix('/review/')
-        allowed = {'bootstrap', 'snapshot', 'diagnostics', 'configure', 'preview'}
+        allowed = {'bootstrap', 'snapshot', 'diagnostics', 'configure', 'preview', 'select_page', 'search_city'}
         if method in allowed:
             result = getattr(api, method)(*args)
         else:

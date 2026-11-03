@@ -22,6 +22,7 @@ import uuid
 import psutil
 from PIL import Image  # collected into the executable for the renderer module
 import app as core
+from data_sources import Sources, location, search_cities, THREAD_ID
 
 
 def user_directory():
@@ -143,10 +144,12 @@ class Sampler:
 
 
 class Api:
-    def __init__(self, directory=None, engine=None, renderer=None, sampler=None):
+    def __init__(self, directory=None, engine=None, renderer=None, sampler=None, sources=None):
         self._core = engine or core
         self._renderer = renderer or load_renderer()
         self._sampler = sampler or Sampler()
+        self._sources = sources or Sources()
+        self._display_page = None
         self._dir = Path(directory or user_directory())
         self._dir.mkdir(parents=True, exist_ok=True)
         self._mutex = threading.RLock()
@@ -188,7 +191,15 @@ class Api:
         interval = config.get('interval', 5)
         if interval not in (3, 5, 10):
             raise ValueError('刷新间隔无效。')
-        return {'widgets': ids, 'interval': interval}
+        valid = {'widgets': ids, 'interval': interval}
+        if 'weather' in config:
+            valid['weather'] = location(config['weather'])
+        if 'codex_thread' in config:
+            thread = config['codex_thread']
+            if not isinstance(thread, str) or (thread and not THREAD_ID.fullmatch(thread)):
+                raise ValueError('Codex 任务 ID 无效，留空可自动跟随最近任务。')
+            valid['codex_thread'] = thread
+        return valid
 
     def _event(self, **values):
         with self._mutex:
@@ -238,7 +249,7 @@ class Api:
 
     def snapshot(self, revision=-1):
         with self._mutex:
-            data = dict(state=copy.deepcopy(self._state), revision=self._revision)
+            data = dict(state=copy.deepcopy(self._state), revision=self._revision, displayPage=self._display_page)
             if revision != self._revision:
                 data['previews'] = list(self._preview)
             return data
@@ -255,6 +266,7 @@ class Api:
                 valid = self._validate(config)
                 atomic_json(self._dir / 'settings.json', valid)
                 self._config = valid
+                self._display_page = None
                 return {'ok': True, 'config': copy.deepcopy(valid)}
             except (ValueError, KeyError, TypeError, OSError) as exc:
                 return {'ok': False, 'message': str(exc)}
@@ -268,6 +280,33 @@ class Api:
             self._event(connected=True, connection='USB 已连接', title='键盘已连接',
                         message='全屏补丁和小组件已就绪。', phase='idle')
         return self._job('connect', work)
+
+    def search_city(self, query):
+        try:
+            return {'ok': True, 'cities': search_cities(query)}
+        except (OSError, ValueError, KeyError, TypeError):
+            return {'ok': False, 'message': '未能搜索城市，请检查网络或换用城市拼音。'}
+
+    def select_page(self, page=None):
+        with self._mutex:
+            count = len(self._renderer.paginate(self._config['widgets']))
+            if page is not None and (type(page) is not int or not 0 <= page < count):
+                return {'ok': False, 'message': '组件页不存在，请先更新预览。'}
+            self._display_page = page
+            return {'ok': True, 'displayPage': page}
+
+    def screen_page(self, direction, confirmed=False):
+        if confirmed is not True or direction not in ('previous', 'next'):
+            return {'ok': False, 'message': '请选择上一界面或下一界面。'}
+        def work():
+            self._core.node_run('wallpaper/pages.js', [direction, '--yes'])
+            self._event(title='已发送界面切换', message='请在键盘确认。切换原厂界面不会新增媒体存储槽。', phase='idle')
+        return self._job('screen-page', work)
+
+    def _read_state(self):
+        state = self._sampler.read()
+        state.update(self._sources.read(self._config['widgets'], self._config))
+        return state
 
     def _make_frames(self, state):
         ids = list(self._config['widgets'])
@@ -283,7 +322,7 @@ class Api:
         def work():
             self._event(title='正在更新预览', message='只读取电脑状态，不向键盘发送。')
             with self._render_lock:
-                self._make_frames(self._sampler.read())
+                self._make_frames(self._read_state())
             self._event(title='预览已更新', message='预览来自这台电脑的实际数据。', phase='idle')
         return self._job('preview', work)
 
@@ -360,11 +399,14 @@ class Api:
             while not self._stop.is_set():
                 begun = time.monotonic()
                 with self._render_lock:
-                    frames = self._make_frames(self._sampler.read())
+                    frames = self._make_frames(self._read_state())
                 if self._stop.is_set():
                     break
                 image = self._dir / 'current.jpg'
-                image.write_bytes(frames[page % len(frames)])
+                with self._mutex:
+                    selected = self._display_page
+                index = page % len(frames) if selected is None else min(selected, len(frames) - 1)
+                image.write_bytes(frames[index])
                 bridge.push_once('push', image=image, on_line=self._line, timeout=45)
                 sent += 1
                 page += 1
@@ -438,9 +480,13 @@ def run(smoke=False):
                 # Exercise Pillow + psutil inside the main frozen app, not only
                 # the separate renderer. This reads host metrics, never USB.
                 with api._render_lock:
-                    frames = api._make_frames(api._sampler.read())
+                    frames = api._make_frames(api._read_state())
                 if not frames or not frames[0].startswith(b'\xff\xd8'):
                     result['error'] = 'real-metrics preview did not render'
+                extra = api._renderer.render({'weather': {'label': '请选择城市'}, 'codex': {'label': '暂无新事件'}},
+                                             widgets=['weather', 'codex'])[0]
+                if not extra.startswith(b'\xff\xd8'):
+                    result['error'] = 'weather/Codex widgets did not render'
         except Exception as exc:
             result['error'] = str(exc)
         finally:

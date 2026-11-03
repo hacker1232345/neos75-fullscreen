@@ -51,7 +51,7 @@ class GlassWorkflow(unittest.TestCase):
         self.core.maintain.side_effect = lambda *a, **k: self.order.append(a[0])
         self.sampler = Mock()
         self.sampler.read.return_value = {'clock': '12:34:56', 'cpu_load': 20}
-        self.api = Api(self.temp.name, self.core, sampler=self.sampler)
+        self.api = Api(self.temp.name, self.core, sampler=self.sampler, sources=Mock(read=Mock(return_value={})))
 
     def wait(self):
         self.api._thread.join(4)
@@ -185,6 +185,38 @@ class GlassWorkflow(unittest.TestCase):
         self.wait()
         self.core.node_run.assert_not_called()
         self.core.maintain.assert_not_called()
+
+
+    def test_weather_settings_persist_without_device_access(self):
+        city = dict(label='测试城市', latitude=30, longitude=120)
+        config = dict(widgets=['weather', 'codex'], weather=city, codex_thread='abcdefgh')
+        self.assertTrue(self.api.configure(config)['ok'])
+        other = Api(self.temp.name, self.core, sampler=self.sampler)
+        self.assertEqual(other.bootstrap()['config']['weather'], city)
+        self.assertEqual(other.bootstrap()['config']['codex_thread'], 'abcdefgh')
+        self.core.node_run.assert_not_called()
+
+    def test_fixed_page_changes_between_transfers_and_navigation_is_exclusive(self):
+        ids = [w['id'] for w in self.api.bootstrap()['registry']['widgets']]
+        self.api.configure(dict(widgets=ids))
+        sent = []
+        def send(*args, **kwargs):
+            sent.append(Path(kwargs['image']).read_bytes())
+            if len(sent) == 1:
+                self.assertFalse(self.api.screen_page('next', True)['ok'])
+                self.assertTrue(self.api.select_page(1)['ok'])
+            else:
+                self.api.stop()
+        self.core.dash.return_value.push_once.side_effect = send
+        with patch.object(self.api, '_make_frames', return_value=[b'first', b'second']), patch.object(self.api._stop, 'wait', return_value=False):
+            self.api.start()
+            self.wait()
+        self.assertEqual(sent, [b'first', b'second'])
+        self.assertFalse(self.api.select_page(999)['ok'])
+        self.assertFalse(self.api.screen_page('next')['ok'])
+        self.assertTrue(self.api.screen_page('previous', True)['ok'])
+        self.wait()
+        self.assertEqual(self.core.node_run.call_args.args, ('wallpaper/pages.js', ['previous', '--yes']))
 
 
 if __name__ == '__main__':

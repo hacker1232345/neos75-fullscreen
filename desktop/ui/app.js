@@ -2,7 +2,10 @@
 const $ = id => document.getElementById(id);
 const symbols = {clock_big:'◷',date:'▦',cpu:'⌘',mem:'▥',gpu:'▧',temp:'°',history_cpu:'⌁',top_proc:'≡',disk:'▰',net:'⇵',ip:'⌗',host:'▣',battery:'▱',volume:'♪',uptime:'◴'};
 const descriptions = {clock_big:'清晰的大号数字时钟',date:'今天的日期',cpu:'处理器使用率与主频',mem:'内存使用率与容量',gpu:'显卡使用率，无法读取时显示 n/a',temp:'系统提供的温度，无法读取时显示 n/a',history_cpu:'最近 60 次 CPU 使用率变化',top_proc:'累计 CPU 用时最多的进程',disk:'可用磁盘空间',net:'当前下载与上传速度',ip:'电脑当前 IPv4 地址',host:'这台电脑的名称',battery:'笔记本电量与供电状态',volume:'系统音量，无法读取时显示 n/a',uptime:'电脑从开机到现在的运行时间'};
-let api, registry, config, state = {}, previews = [], page = 0, revision = -1, ready = false, pending = false, timer, confirmAction;
+let api, registry, config, state = {}, previews = [], page = 0, displayPage = null, revision = -1, ready = false, pending = false, timer, confirmAction;
+symbols.weather='☀'; symbols.codex='⌁';
+descriptions.weather='所选城市的温度与天气，10 分钟更新，断网标记缓存';
+descriptions.codex='本机 Codex 任务事件状态与更新时间，不显示聊天正文';
 function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(timer); timer = setTimeout(() => $('toast').hidden = true, 5000); }
 async function call(name, ...args) { try { return await api[name](...args); } catch (e) { toast('操作失败，请查看诊断或重新打开程序。'); console.error(e); return {ok:false}; } }
 function el(tag, cls, text) { const n = document.createElement(tag); if(cls) n.className = cls; if(text !== undefined) n.textContent = text; return n; }
@@ -13,7 +16,7 @@ function renderList() { const list = $('widget-list'); list.replaceChildren(); $
   config.widgets.forEach((id,i) => { const w = registry.widgets.find(x=>x.id===id); const row = el('li','widget-row'); row.append(el('span','widget-symbol',symbols[id]||'◇')); const title = el('span','widget-name',w.label); title.append(el('small','',w.group)); row.append(title); const actions = el('div','row-actions');
     for(const [text,label,offset] of [['↑','上移',-1],['↓','下移',1],['×','移除',0]]) { const b = el('button','icon-button',text); b.setAttribute('aria-label',`${label}${w.label}`); b.disabled = !!state.busy || (offset!==0 && (i+offset<0 || i+offset>=config.widgets.length)); b.addEventListener('click',async()=>{ const next=[...config.widgets]; if(offset) [next[i],next[i+offset]]=[next[i+offset],next[i]]; else next.splice(i,1); await save({...config,widgets:next}); }); actions.append(b); } row.append(actions); list.append(row); });
   $('preset').value=Object.keys(registry.presets).find(k=>JSON.stringify(registry.presets[k])===JSON.stringify(config.widgets))||'custom';
-  $('interval').value = config.interval; updatePreview(); }
+  $('interval').value = config.interval; $('current-city').textContent=config.weather?.label||'尚未设置城市'; updatePreview(); }
 async function save(next) { if(pending || state.busy) return; pending = true; const result = await call('configure',next); pending = false; if(!result.ok) { toast(result.message||'配置未保存。'); return; } config=result.config; $('preset').value='custom'; previews=[]; page=0; renderList(); renderCatalog(); await refreshPreview(); }
 function renderCatalog() { const root=$('catalog-list'), search=$('search').value.trim().toLowerCase(); root.replaceChildren(); let count=0;
   for(const group of registry.groups) { const items=registry.widgets.filter(w=>w.group===group && `${w.label} ${descriptions[w.id]||''} ${w.id}`.toLowerCase().includes(search)); if(!items.length) continue; root.append(el('h3','catalog-group',group)); for(const w of items) { count++; const row=el('div','catalog-row'), detail=el('div'); detail.append(el('strong','',w.label),el('p','',descriptions[w.id]||w.label)); const exists=config.widgets.includes(w.id); const add=el('button','',exists?'已添加':'添加'); add.disabled=exists||!!state.busy; add.setAttribute('aria-label',exists?`${w.label}已添加`:`添加${w.label}`); add.onclick=async()=>{await save({...config,widgets:[...config.widgets,w.id]});}; row.append(detail,add); root.append(row); } }
@@ -26,10 +29,14 @@ function paint() { const busy=!!state.busy; $('connection-label').textContent = 
   $('restore').disabled=busy||!state.restore; $('sync').disabled=busy&&state.kind!=='stream' || (!config.widgets.length&&!busy); $('sync').textContent=state.kind==='stream'?'停止同步':'开始同步'; $('sync-note').textContent=state.stream?`已发送 ${state.sent||0} 帧 · 请看屏确认`:'通过 USB 同步到键盘';
   // Preserve focus during polling: mutate action state, don't rebuild the list.
   $('widget-list').querySelectorAll('li').forEach((row,i)=>row.querySelectorAll('button').forEach((b,j)=>b.disabled=busy||(j===0&&i===0)||(j===1&&i===config.widgets.length-1)));
+  for(const id of ['data-settings','screen-previous','screen-next','city-query','city-search','codex-thread']) $(id).disabled=busy;
+  for(const id of ['pin-page','cycle-pages']) $(id).disabled=!previews.length||(busy&&state.kind!=='stream');
+  $('display-mode').textContent=displayPage===null?'自动轮播':`固定第 ${displayPage+1} 页`;
+  $('pin-page').setAttribute('aria-pressed',String(displayPage===page));
   if($('catalog').open) $('catalog-list').querySelectorAll('button').forEach(b=>{b.disabled=busy||b.textContent==='已添加';});
 }
 let polling=false;
-async function poll() { if(!ready || polling) return; polling=true; try { const r=await api.snapshot(revision); state=r.state; if(r.previews) { previews=r.previews; revision=r.revision; updatePreview(); } paint(); } catch(e) { $('status-title').textContent='连接程序失败'; $('status-message').textContent='请关闭窗口后重新打开程序。'; } finally { polling=false; } }
+async function poll() { if(!ready || polling) return; polling=true; try { const r=await api.snapshot(revision); state=r.state; displayPage=r.displayPage??null; if(r.previews) { previews=r.previews; revision=r.revision; updatePreview(); } paint(); } catch(e) { $('status-title').textContent='连接程序失败'; $('status-message').textContent='请关闭窗口后重新打开程序。'; } finally { polling=false; } }
 function confirm(title,copy,button,fn) { $('confirm-title').textContent=title; $('confirm-copy').textContent=copy; $('confirm-action').textContent=button; confirmAction=fn; openDialog('confirmation'); }
 async function boot(bridge) { if(ready) return; api=bridge; const data=await api.bootstrap(); registry=data.registry; config=data.config; ready=true; $('version').textContent=`v${data.version}`; $('backup-path').textContent=data.backupDirectory; renderList(); renderCatalog(); await poll(); setInterval(poll,700); }
 $('tab-fullscreen').onclick=()=>showTab('fullscreen'); $('tab-widgets').onclick=()=>showTab('widgets');
@@ -41,7 +48,15 @@ for(const id of ['add-widget','empty-add']) $(id).onclick=()=>{renderCatalog();o
 $('search').oninput=renderCatalog;
 $('preset').onchange=async e=>{if(registry.presets[e.target.value])await save({...config,widgets:[...registry.presets[e.target.value]]});};
 $('interval').onchange=async e=>save({...config,interval:Number(e.target.value)});
-$('preview-refresh').onclick=refreshPreview; $('prev-page').onclick=()=>{page--;updatePreview();}; $('next-page').onclick=()=>{page++;updatePreview();};
+$('preview-refresh').onclick=refreshPreview;
+async function movePage(offset) { page+=offset;updatePreview();if(displayPage!==null) {await call('select_page',page);await poll();} }
+$('prev-page').onclick=()=>movePage(-1); $('next-page').onclick=()=>movePage(1);
+$('pin-page').onclick=async()=>{await call('select_page',page);await poll();};
+$('cycle-pages').onclick=async()=>{await call('select_page',null);await poll();};
+for(const direction of ['previous','next']) $('screen-'+direction).onclick=async()=>{const r=await call('screen_page',direction,true);if(!r.ok)toast(r.message);await poll();};
+$('data-settings').onclick=()=>{$('codex-thread').value=config.codex_thread||'';openDialog('data-dialog');$('city-query').focus();};
+$('city-form').onsubmit=async e=>{e.preventDefault();$('city-search').disabled=true;$('city-status').textContent='正在搜索城市…';$('city-results').replaceChildren();try{const r=await call('search_city',$('city-query').value);$('city-status').textContent=r.ok?(r.cities.length?'请选择城市':'没有找到城市，可尝试拼音或添加地区名'):r.message||'搜索失败';for(const city of r.cities||[]){const button=el('button','secondary',city.label);button.type='button';button.onclick=async()=>{await save({...config,weather:city});$('city-status').textContent=config.weather?.label===city.label?'城市已保存':'城市未保存，请先停止当前操作';};$('city-results').append(button);}}finally{$('city-search').disabled=!!state.busy;}};
+$('codex-form').onsubmit=async e=>{e.preventDefault();const thread=$('codex-thread').value.trim();if(thread&&!/^[a-zA-Z0-9_-]{8,80}$/.test(thread)){$('codex-error').textContent='请输入有效任务 ID，或留空自动跟随。';$('codex-thread').focus();return;}await save({...config,codex_thread:thread});$('codex-error').textContent=config.codex_thread===thread?'任务选择已保存':'未保存，请先停止当前操作';};
 $('sync').onclick=async()=>{if(state.kind==='stream') {await call('stop');await poll();} else confirm('开始同步小组件','当前屏幕图片会被替换为组件画面。多页组件会依次轮播；请先关闭官方程序的上传任务。','开始同步',async()=>{const r=await call('start');await poll();return r;});};
 $('backup-settings').onclick=()=>openDialog('settings'); $('open-backups').onclick=()=>call('open_backups');
 $('restore').onclick=()=>{ $('settings').close(); confirm('恢复最近一次备份','请连接上次应用补丁的同一把键盘。程序会检查现场固件，再恢复该次应用前的备份。','检查并恢复',()=>call('restore',true));};

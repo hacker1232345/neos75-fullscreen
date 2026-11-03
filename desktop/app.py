@@ -112,7 +112,7 @@ def maintain(mode, baseline, target, yes=False, on_line=None, force=False):
 
 def self_test(on_line=None):
     checks = {}
-    for label, script in [('mcu_transport', 'tools/test_mcu_transport.js'), ('backup', 'tools/test_mcu_backup.js'), ('wallpaper_protocol', 'wallpaper/selftest.js'), ('force_flash_model', 'tools/test_force_flash.js'), ('automatic_profiles', 'tools/test_profiles.js'),
+    for label, script in [('mcu_transport', 'tools/test_mcu_transport.js'), ('backup', 'tools/test_mcu_backup.js'), ('wallpaper_protocol', 'wallpaper/selftest.js'), ('screen_navigation', 'wallpaper/test_pages.js'), ('force_flash_model', 'tools/test_force_flash.js'), ('automatic_profiles', 'tools/test_profiles.js'),
                           ('native_modules', 'desktop/native_check.js')]:
         checks[label] = node_run(script, on_line=on_line)
     # 屏幕部件模块：离线自测（不打开 USB）。缺失时记为 SKIP 而不是让整套自检失败。

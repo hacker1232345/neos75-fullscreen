@@ -140,6 +140,26 @@
     "draw": "draw_volume"
   },
   {
+    "id": "weather",
+    "label": "天气",
+    "desc": "指定城市的当前温度与天气，每 10 分钟更新，断网标记缓存",
+    "group": "生活",
+    "default": false,
+    "minWidth": 220,
+    "minHeight": 112,
+    "draw": "draw_weather"
+  },
+  {
+    "id": "codex",
+    "label": "Codex 进度",
+    "desc": "本机 Codex 任务事件状态与更新时间，不展示聊天正文或虚构百分比",
+    "group": "工作",
+    "default": false,
+    "minWidth": 220,
+    "minHeight": 112,
+    "draw": "draw_codex"
+  },
+  {
     "id": "uptime",
     "label": "运行时长",
     "desc": "自开机以来的时长",

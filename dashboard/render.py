@@ -122,10 +122,12 @@ PRESETS = {
         "net", "ip", "host",
         "disk",
         "battery", "volume",
-        "uptime",
+        "uptime", "weather", "codex",
     ],
     "performance": ["cpu", "mem", "gpu", "temp", "history_cpu", "top_proc", "uptime", "clock_big"],
     "network": ["clock_big", "net", "ip", "host", "uptime"],
+    "weather": ["weather", "clock_big", "date"],
+    "codex": ["codex", "clock_big", "cpu", "mem"],
 }
 
 
@@ -605,7 +607,43 @@ def draw_history_cpu(d, b, st, ctx):
 
 
 
+def _text_rows(d, b, title, rows, color=TXT):
+    cx, cy, cw, ch = _frame(d, b, title)
+    step = ch / max(1, len(rows))
+    for index, row in enumerate(rows):
+        size = min(26 if index == 0 else 14, max(9, int(step * 0.75)))
+        text, size = fitw(str(row), cw, size, 'bd' if index == 0 else 'reg', 8)
+        put(d, (cx, cy + step * (index + 0.5)), text, size,
+            'bd' if index == 0 else 'reg', color if index == 0 else DIM, anchor='lm')
+
+
+def draw_weather(d, b, st, ctx):
+    value = st.get('weather') or {}
+    if not isinstance(value, dict):
+        value = {}
+    temperature = value.get('temperature')
+    status = value.get('status')
+    main = (num(temperature, 1) + ' °C  ' + str(value.get('label', ''))) if temperature is not None else value.get('label', '请选择城市')
+    observed = str(value.get('observed_at', '')).replace('T', ' ')
+    detail = ('缓存 · ' if status == 'stale' else '') + (observed or '在组件设置中选择城市')
+    _text_rows(d, b, '天气', [main, value.get('city', '尚未设置城市'), detail, 'Open-Meteo · CC BY 4.0'], WARN if status == 'stale' else ACCENT)
+
+
+def draw_codex(d, b, st, ctx):
+    value = st.get('codex') or {}
+    if not isinstance(value, dict):
+        value = {}
+    age = value.get('age')
+    detail = f'{int(age) // 60} 分钟前更新' if isinstance(age, (int, float)) and age >= 60 else ('刚刚更新' if age is not None else '只读本机任务状态')
+    state = value.get('state')
+    color = GOOD if state == 'completed' else WARN if state in ('waiting', 'unknown') else ACCENT
+    _text_rows(d, b, 'Codex', [value.get('label', '未发现本地任务'), detail,
+                             value.get('source', '本地事件') + ' · 无事件不代表完成'], color)
+
+
 DRAW_FNS = {
+    "draw_weather": draw_weather,
+    "draw_codex": draw_codex,
     "draw_clock_big": draw_clock_big,
     "draw_date": draw_date,
     "draw_cpu": draw_cpu,

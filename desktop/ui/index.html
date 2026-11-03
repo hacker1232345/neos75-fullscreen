@@ -28,16 +28,18 @@
     <section id="widgets" aria-labelledby="widgets-title" hidden>
       <div class="widget-heading"><div><p class="eyebrow">键盘小屏</p><h1 id="widgets-title">自由组合小组件</h1><p class="subtitle">选几个常用组件，放进键盘小屏。</p></div><button class="secondary glass" id="add-widget"><span aria-hidden="true">＋</span> 添加组件</button></div>
       <div class="widget-layout">
-        <div class="editor"><div class="editor-heading"><h2>已添加 <span id="widget-count">0</span></h2><label class="sr-only" for="preset">组件预设</label><select id="preset"><option value="custom">自定义</option><option value="minimal">日常</option><option value="performance">性能</option><option value="network">网络</option><option value="default">常用组合</option><option value="full">全部组件</option></select></div>
+        <div class="editor"><div class="editor-heading"><h2>已添加 <span id="widget-count">0</span></h2><label class="sr-only" for="preset">组件预设</label><select id="preset"><option value="custom">自定义</option><option value="minimal">日常</option><option value="performance">性能</option><option value="network">网络</option><option value="weather">天气</option><option value="codex">Codex</option><option value="default">常用组合</option><option value="full">全部组件</option></select></div>
           <p id="empty" class="empty" hidden>小屏还空着。<br><button class="text-button" id="empty-add">添加第一个组件</button></p>
           <ol id="widget-list" aria-label="组件顺序"></ol>
           <div class="interval-row"><label for="interval">刷新间隔</label><select id="interval"><option value="3">3 秒</option><option value="5">5 秒</option><option value="10">10 秒</option></select></div>
-          <p class="hint">组件较多时自动分页轮播，保持文字清晰。</p>
+          <p class="hint">组件较多时自动分页轮播，保持文字清晰。<button class="text-button" id="data-settings">天气与 Codex 设置</button></p>
         </div>
         <div class="preview-column"><div class="preview-heading"><h2>屏幕预览</h2><button class="icon-button" id="preview-refresh" aria-label="刷新电脑数据与预览">↻</button></div>
           <div class="screen-case preview-case"><div class="preview-surface"><img id="preview-image" width="480" height="360" alt="键盘小组件实际渲染预览" hidden><p id="preview-placeholder">添加组件，预览你的小屏</p></div></div>
           <div class="pages"><button class="icon-button" id="prev-page" aria-label="上一页">‹</button><span id="page-label">480 × 360</span><button class="icon-button" id="next-page" aria-label="下一页">›</button></div>
+          <div class="display-choice"><button class="secondary" id="pin-page">固定当前组件页</button><button class="text-button" id="cycle-pages">自动轮播全部页</button><span id="display-mode" role="status">自动轮播</span></div>
           <div class="sync-row"><button class="primary" id="sync">开始同步</button><span class="hint" id="sync-note">通过 USB 同步到键盘</span></div>
+          <details class="screen-navigation"><summary>切换键盘原厂界面</summary><div class="display-choice"><button class="secondary" id="screen-previous">上一界面</button><button class="secondary" id="screen-next">下一界面</button></div><p class="hint">请先停止组件同步。当前上传协议只提供一个自定义媒体区，切页不会让图片与组件分别保存；停止同步后需在官方程序重新导入图片或 GIF。</p></details>
           <p class="sensor-note">预览使用本机数据。温度等传感器无法读取时显示 n/a。</p>
         </div>
       </div>
@@ -50,5 +52,11 @@
 <dialog id="confirmation" aria-labelledby="confirm-title"><div class="dialog-header"><h2 id="confirm-title">应用全屏补丁</h2><button class="icon-button close" aria-label="取消操作">×</button></div><p id="confirm-copy"></p><p class="callout" id="confirm-callout">请使用 USB 数据线直连，关闭官方程序。写入期间不要拔线或退出。</p><div class="dialog-actions"><button class="secondary close">取消</button><button class="primary" id="confirm-action">备份并应用</button></div></dialog>
 <dialog id="settings" aria-labelledby="settings-title"><div class="dialog-header"><h2 id="settings-title">备份与恢复</h2><button class="icon-button close" aria-label="关闭备份设置">×</button></div><p>不需要事先准备固件。每次应用补丁前，程序会自动读取并双重校验这把键盘的完整固件。</p><button class="secondary" id="open-backups">打开备份文件夹 ↗</button><p class="path" id="backup-path"></p><hr><h3>恢复上次备份</h3><p>恢复最近一次应用补丁前的状态。请连接同一把键盘。</p><button class="secondary" id="restore">恢复备份</button><details><summary>高级选项</summary><label class="check-row"><input id="force" type="checkbox">无验证，直接打补丁</label><p class="warning">跳过固件版本和旧字节检查，固定偏移可能不兼容。自动备份和写后回验仍保留。仅在确认兼容性时使用。</p></details></dialog>
 <dialog id="diagnostics" aria-labelledby="diagnostics-title"><div class="dialog-header"><h2 id="diagnostics-title">诊断记录</h2><button class="icon-button close" aria-label="关闭诊断">×</button></div><p class="hint">提交问题前请检查记录中的本机路径等个人信息。</p><pre id="log"></pre><button class="secondary" id="copy-log">复制记录</button></dialog>
+<dialog id="data-dialog" aria-labelledby="data-title"><div class="dialog-header"><h2 id="data-title">天气与 Codex</h2><button class="icon-button close" aria-label="关闭数据设置">×</button></div>
+  <form id="city-form"><label for="city-query">天气城市</label><div class="search-row"><input id="city-query" name="city" type="search" placeholder="例如：杭州或 Hangzhou…" autocomplete="off" required minlength="2" maxlength="80"><button class="secondary" id="city-search" type="submit">搜索</button></div></form>
+  <p id="city-status" role="status" aria-live="polite"></p><div id="city-results" class="city-results" aria-label="城市搜索结果"></div><p class="hint" id="current-city">尚未设置城市</p>
+  <p class="hint">仅发送所选城市到 Open-Meteo，不自动定位。每 10 分钟刷新；当前天气来自天气模型，非秒级观测。免费接口限非商业用途，数据 CC BY 4.0。</p>
+  <hr><form id="codex-form"><label for="codex-thread">Codex 任务 ID（可留空）</label><input id="codex-thread" name="thread" type="text" autocomplete="off" spellcheck="false" maxlength="80" placeholder="留空自动跟随最近更新的任务…"><p class="hint">只读本机 CODEX_HOME 或 ~/.codex 的任务事件，显示状态与更新时间，不展示聊天正文。日志格式变化或缺少事件时显示“暂无新事件”，不推测完成。远程任务需本地事件桥。</p><p id="codex-error" role="status"></p><button class="secondary" type="submit">保存任务选择</button></form>
+</dialog>
 <div class="toast" id="toast" role="status" hidden></div>
 </body></html>
