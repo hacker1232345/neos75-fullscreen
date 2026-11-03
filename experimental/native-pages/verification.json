@@ -1,0 +1,31 @@
+{
+  "checked_at": "2026-11-03T08:34:58.468097+00:00",
+  "state": "offline_verified_not_device_tested",
+  "firmware_sha256": "b1f054b44c77eedb17de3d350a450ae8b47386aeee01663169b6f37aa65b3b70",
+  "payload_sha256": "1e3708688f3b5f2be1420118e42ca783701619e1c74e05aa35d44a634b672089",
+  "bytes": 491536,
+  "changed_bytes": 1256,
+  "checks": {
+    "rebuilt_identical": true,
+    "manifest_identical": true,
+    "config_tail_unchanged": true,
+    "dfu_crc_valid": true,
+    "arm_emulation": 12,
+    "telemetry_tests": 3,
+    "node_sender": "PASS",
+    "stable_python": 86,
+    "stable_node_groups": 7
+  },
+  "hardware": {
+    "enumerated_screen_interfaces": 0,
+    "usb_opened": false,
+    "dfu_entered": false,
+    "flashed": false,
+    "display_verified": false
+  },
+  "emulation_limits": [
+    "LVGL/heap/timer creation stubbed",
+    "page5 media decoder stubbed during real 6->5->6 navigation",
+    "LCD/RTOS/peripherals not emulated"
+  ]
+}

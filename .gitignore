@@ -19,3 +19,4 @@ __pycache__/
 /dashboard/.history/
 /build-ui-*.log
 /build-gui-smoke.json
+/experimental/native-pages/*.bin

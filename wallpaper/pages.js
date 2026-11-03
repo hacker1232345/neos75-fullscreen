@@ -11,10 +11,12 @@ function packet(direction) {
   return bytes;
 }
 function validateAck(r) {
-  if (r.length < 6 || r[0] !== 0xa5 || r[1] !== 0x39 || r[2] !== 0 || r[4] !== 0) throw Error('Page acknowledgement header mismatch');
+  if (r.length < 7 || r[0] !== 0xa5 || r[1] !== 0x39 || r[2] !== 0 || r[3] !== 2) throw Error('Page acknowledgement header mismatch');
   const n = r[3];
   if (n < 1 || 4 + n >= r.length) throw Error('Page acknowledgement truncated');
   if (((r.subarray(1, 4 + n).reduce((a, b) => a + b, 0) ^ 255) & 255) !== r[4 + n]) throw Error('Page acknowledgement checksum mismatch');
+  // Vendor 0x35220 -> 0x351D0 returns [status, flags], unlike read selector replies.
+  if (r[4] !== 0xfe) throw Error('Device rejected page change');
 }
 async function change(dev, direction) {
   const bytes = packet(direction);

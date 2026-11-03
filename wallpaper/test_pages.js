@@ -8,9 +8,11 @@ async function test() {
   assert.equal(pages.packet('next').length, 65);
   assert.throws(() => pages.packet('factory-reset'));
   await assert.rejects(pages.main(['next']), /--yes/);
-  const ack = Buffer.from([0xa5, 0x39, 0, 1, 0, 0xc5]);
+  // Cross-checked by executing the reference firmware parser in ARM emulation.
+  const ack = Buffer.from('a5390002fe00c6', 'hex');
   pages.validateAck(ack);
   assert.throws(() => pages.validateAck(Buffer.from([0xa5, 0x39, 0, 1, 0, 0])));
+  assert.throws(() => pages.validateAck(Buffer.from('a5390002fc00c8', 'hex')), /rejected/);
   class Device extends EventEmitter {
     write(bytes) { setImmediate(() => this.emit('data', ack)); this.written = Buffer.from(bytes); return bytes.length; }
   }
