@@ -2,7 +2,8 @@
 from pathlib import Path
 import json,os,shutil,subprocess,sys,tempfile
 root=Path(__file__).resolve().parents[1]
-exe=Path(sys.argv[1]).resolve() if len(sys.argv)>1 else root/('dist/Neos75-Fullscreen.exe' if sys.platform=='win32' else 'dist/Neos75-Fullscreen.app/Contents/MacOS/Neos75-Fullscreen')
+paths={'win32':'dist/Neos75-Fullscreen.exe','darwin':'dist/Neos75-Fullscreen.app/Contents/MacOS/Neos75-Fullscreen','linux':'dist/Neos75-Fullscreen/Neos75-Fullscreen'}
+exe=Path(sys.argv[1]).resolve() if len(sys.argv)>1 else root/paths[sys.platform]
 # PyInstaller 的 onefile 引导会检查路径是否"安全"：路径里出现会影响 DLL 搜索的证据，
 # 或目录本身不给当前用户建临时目录的权限时，它会直接拒绝解包。CI 上路径永远是干净的
 # ASCII，但本地仓库常常放在带权限收紧或非 ASCII 的目录里 —— 那种情况下先在
@@ -18,6 +19,8 @@ if sys.platform=='win32':
         print('note: 原路径含非 ASCII 字符，已复制到 %s 再测（PyInstaller onefile 引导限制，与程序无关）'%staged)
         exe=staged
 env=os.environ.copy();env['PATH']='';env.pop('NODE_PATH',None);env.pop('PYTHONPATH',None);env.pop('PYTHONHOME',None)
+if sys.platform=='linux':
+    env['QT_API']='pyside6'
 try:
     with tempfile.TemporaryDirectory() as t:
         for label,arg in [('selftest','--self-test'),('gui','--gui-smoke')]:

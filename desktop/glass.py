@@ -386,6 +386,8 @@ class Api:
             os.startfile(str(folder))
         elif sys.platform == 'darwin':
             subprocess.Popen(['open', str(folder)])
+        else:
+            subprocess.Popen(['xdg-open', str(folder)])
         return {'ok': True}
 
     def _closing(self):
@@ -403,6 +405,10 @@ class Api:
 
 
 def run(smoke=False):
+    if sys.platform.startswith('linux'):
+        if os.geteuid() == 0:
+            raise RuntimeError('请以普通用户启动界面，使用专用 udev 规则配置 USB 权限。')
+        os.environ['QT_API'] = 'pyside6'
     import webview
     temporary = tempfile.TemporaryDirectory(prefix='neos75-smoke-') if smoke else None
     api = Api(directory=temporary.name if temporary else None)
@@ -426,13 +432,20 @@ def run(smoke=False):
                 count = window.evaluate_js("document.querySelectorAll('#widget-list li').length")
                 if count < 1:
                     result['error'] = 'widget registry not rendered'
+                # Exercise Pillow + psutil inside the main frozen app, not only
+                # the separate renderer. This reads host metrics, never USB.
+                with api._render_lock:
+                    frames = api._make_frames(api._sampler.read())
+                if not frames or not frames[0].startswith(b'\xff\xd8'):
+                    result['error'] = 'real-metrics preview did not render'
         except Exception as exc:
             result['error'] = str(exc)
         finally:
             window.destroy()
     if smoke:
         window.events.loaded += check
-    webview.start(debug=False, private_mode=True, gui='edgechromium' if sys.platform == 'win32' else None,
+    engine = 'edgechromium' if sys.platform == 'win32' else ('qt' if sys.platform.startswith('linux') else None)
+    webview.start(debug=False, private_mode=True, gui=engine,
                   icon=str(core.PROJECT / ('desktop/ui/icon.ico' if sys.platform == 'win32' else 'desktop/ui/icon.png')))
     if smoke:
         temporary.cleanup()

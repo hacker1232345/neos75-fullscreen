@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+if [ "$(id -u)" -eq 0 ]; then
+    printf '%s\n' '请以普通用户启动 Neos75。USB 权限请单独运行 sudo ./install-usb-access.sh 安装。' >&2
+    exit 1
+fi
+bundle_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export QT_API=pyside6
+exec "$bundle_dir/Neos75-Fullscreen" "$@"

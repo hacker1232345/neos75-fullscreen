@@ -1,7 +1,9 @@
 name: Build desktop applications
 on:
   push:
+    branches: ['main', 'feat/**']
     tags: ['v1.*']
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
@@ -17,6 +19,8 @@ jobs:
             name: macOS-arm64
           - os: macos-15-intel
             name: macOS-x64
+          - os: ubuntu-22.04
+            name: Linux-x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -27,24 +31,57 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install Linux desktop libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libopengl0 libnss3 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-image0 libxcb-render-util0 libasound2 libudev1 libusb-1.0-0 fonts-noto-cjk python3-tk xvfb xauth xdg-utils
       - name: Install build dependencies
+        shell: bash
         run: |
           npm ci --ignore-scripts
-          python -m pip install -r requirements-dev.txt pyinstaller==6.22.2
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            python -m pip install -r requirements-linux.txt pyinstaller==6.22.2
+          else
+            python -m pip install -r requirements-dev.txt pyinstaller==6.22.2
+          fi
       - name: Test source without a USB device
         run: |
           npm test
           python -m unittest discover -s tests -v
       - name: Build native application
         run: python desktop/build_exe.py
+      - name: Check Linux distribution files
+        if: runner.os == 'Linux'
+        run: python desktop/check_linux_bundle.py
       - name: Test packaged runtime and GUI
-        run: python desktop/ci_smoke.py
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            export QT_API=pyside6
+            export QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu
+            export LIBGL_ALWAYS_SOFTWARE=1
+            xvfb-run -a python desktop/ci_smoke.py
+          else
+            python desktop/ci_smoke.py
+          fi
+      - name: Preserve build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostics-${{ matrix.name }}
+          path: |
+            build/**/*.txt
+            build/**/*.spec
+          if-no-files-found: ignore
       - name: Package downloads
         shell: bash
         run: |
           mkdir -p release
           if [[ "$RUNNER_OS" == "macOS" ]]; then
             ditto -c -k --keepParent dist/Neos75-Fullscreen.app release/Neos75-${{ matrix.name }}.zip
+          elif [[ "$RUNNER_OS" == "Linux" ]]; then
+            tar -C dist -czf release/Neos75-${{ matrix.name }}.tar.gz Neos75-Fullscreen
           else
             cp dist/Neos75-Fullscreen.exe release/Neos75-${{ matrix.name }}.exe
           fi

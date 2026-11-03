@@ -1,4 +1,4 @@
-"""Reproducible Windows x64 single-file build (run npm ci first)."""
+"""Build native Windows, macOS and Linux desktop bundles (run npm ci first)."""
 from pathlib import Path
 import argparse
 import hashlib
@@ -9,10 +9,31 @@ import sys
 import urllib.request
 import urllib.error
 import platform
+import os
 from importlib.metadata import distribution, PackageNotFoundError
 
 ROOT=Path(__file__).resolve().parents[1]
 VERSION=json.loads((ROOT/'package.json').read_text(encoding='utf-8'))['version']
+
+
+def hid_prebuilds(target, arch):
+    names = {f'HID-{target}-{arch}'}
+    if target == 'linux':
+        names.add(f'HID_hidraw-{target}-{arch}')
+    return names
+
+
+def linux_fonts():
+    if not sys.platform.startswith('linux'):
+        return []
+    font = Path('/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc')
+    if not font.is_file():
+        raise SystemExit('Install fonts-noto-cjk before building the Linux package.')
+    result = [(str(font), 'fonts')]
+    license_file = Path('/usr/share/doc/fonts-noto-cjk/copyright')
+    if license_file.exists():
+        result.append((str(license_file), 'licenses/NotoSansCJK'))
+    return result
 
 def build_renderer(node, dist, work):
     """把 dashboard/render.py 单独冻结成一个可执行渲染器，放进 runtime/。
@@ -22,7 +43,7 @@ def build_renderer(node, dist, work):
     和 desktop/dash_bridge.py 只需把「解释器 + 脚本」换成这个 exe。
     """
     spec=work/'Neos75-Render.spec'
-    datas=[(str(ROOT/'dashboard/widgets.json'),'dashboard')]
+    datas=[(str(ROOT/'dashboard/widgets.json'),'dashboard'), *linux_fonts()]
     spec_text=('a = Analysis('+repr([str(ROOT/'dashboard/render.py')])+', pathex=[], binaries=[], '
                'datas='+repr(datas)+', hiddenimports=[], excludes=[])\n'
                'pyz = PYZ(a.pure)\n')
@@ -39,7 +60,9 @@ def main():
     p.add_argument('--dist',type=Path,default=ROOT/'dist')
     p.add_argument('--work',type=Path,default=ROOT/'build')
     a=p.parse_args()
-    if sys.platform not in ['win32','darwin']:raise SystemExit('Build on Windows or macOS.')
+    if sys.platform not in ['win32','darwin','linux']:raise SystemExit('Build on Windows, macOS or Linux.')
+    if sys.platform == 'linux':
+        os.environ['QT_API'] = 'pyside6'
     node=shutil.which('node')
     if not node:raise SystemExit('Node.js is required on the build machine.')
     if not (ROOT/'node_modules/node-hid').exists():raise SystemExit('Run npm ci before building.')
@@ -60,17 +83,18 @@ def main():
             license_url=f'https://raw.githubusercontent.com/nodejs/node/{major}.x/LICENSE'
             with urllib.request.urlopen(license_url) as r:license_file.write_bytes(r.read())
         (a.work/'NODE-LICENSE-source.txt').write_text(license_url,encoding='utf-8')
-    datas=[(str(node),'runtime'),(str(license_file),'licenses')]
+    datas=[(str(node),'runtime'),(str(license_file),'licenses'), *linux_fonts()]
     for name in ['pywebview', 'psutil', 'Pillow', 'pythonnet', 'clr_loader',
-                 'proxy_tools', 'bottle', 'cffi', 'pycparser']:
+                 'proxy_tools', 'bottle', 'cffi', 'pycparser', 'PySide6',
+                 'PySide6_Essentials', 'PySide6_Addons', 'shiboken6', 'QtPy']:
         try:
             package_dist = distribution(name)
         except PackageNotFoundError:
             continue  # pythonnet/clr_loader are Windows-only webview dependencies.
-        entries = [f for f in (package_dist.files or []) if Path(f).name.upper() in ('LICENSE', 'LICENSE.TXT', 'COPYING')]
+        entries = [f for f in (package_dist.files or []) if Path(f).name.upper() in ('LICENSE', 'LICENSE.TXT', 'COPYING') or 'licenses/' in str(f).lower()]
         if not entries:
             entries = [f for f in (package_dist.files or []) if str(f).endswith('.dist-info/METADATA')]
-        datas.extend((str(package_dist.locate_file(f)), 'licenses/' + name) for f in entries)
+        datas.extend((str(package_dist.locate_file(f)), 'licenses/' + name + '/' + str(f.parent)) for f in entries)
     # 随包渲染器：桌面版渲染屏幕部件时用它，不依赖目标机器的 Python/Pillow
     renderer=build_renderer(node,a.dist,a.work)
     datas.append((str(renderer),'runtime'))
@@ -78,9 +102,9 @@ def main():
         # Explicit allowlist: never collect the repo root, local backups, or build products.
         for f in sorted((ROOT/folder).rglob('*')):
             if not f.is_file() or '__pycache__' in f.parts:continue
-            if folder=='node_modules' and 'prebuilds' in f.parts:
+            if folder=='node_modules' and 'node-hid' in f.parts and 'prebuilds' in f.parts:
                 prebuild=f.parts[f.parts.index('prebuilds')+1]
-                if prebuild!=f'HID-{sys.platform}-{node_arch}':continue
+                if prebuild not in hid_prebuilds(sys.platform, node_arch):continue
             if folder=='dashboard' and '.history' in f.parts:continue  # 采样历史是运行时产物
             if folder=='desktop' and f.suffix=='.py' and f.name!='dash_bridge.py':continue  # 只带桥接层，不带构建脚本
             if folder!='node_modules' and (f.suffix in ['.bin','.pyc'] or f.name.endswith('.rollback.json')):continue
@@ -92,17 +116,33 @@ def main():
     spec=a.work/'Neos75-Fullscreen.spec'
     # The webview hook collects WebView2/WKWebView runtime pieces. Pillow/psutil
     # are explicit because the dashboard renderer is loaded from a fixed path.
-    spec_text='a = Analysis('+repr([str(ROOT/'desktop/app.py')])+', pathex='+repr([str(ROOT/'desktop')])+', binaries=[], datas='+repr(datas)+', hiddenimports=["glass", "webview", "psutil", "PIL.Image", "PIL.ImageDraw", "PIL.ImageFont"], excludes=[])\npyz = PYZ(a.pure)\n'
+    hidden = ['glass', 'webview', 'psutil', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont']
+    if sys.platform == 'linux':
+        hidden += ['webview.platforms.qt', 'qtpy', 'PySide6.QtWebEngineCore',
+                   'PySide6.QtWebEngineWidgets', 'PySide6.QtWebChannel', 'PySide6.QtNetwork']
+    spec_text='a = Analysis('+repr([str(ROOT/'desktop/app.py')])+', pathex='+repr([str(ROOT/'desktop')])+', binaries=[], datas='+repr(datas)+', hiddenimports='+repr(hidden)+', excludes=[])\npyz = PYZ(a.pure)\n'
     if sys.platform=='win32':
         spec_text+="exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name='Neos75-Fullscreen', icon="+repr(str(ROOT/'desktop/ui/icon.ico'))+", debug=False, strip=False, upx=False, console=False)\n"
-    else:
+    elif sys.platform == 'darwin':
         spec_text+="exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='Neos75-Fullscreen', debug=False, strip=False, upx=False, console=False)\n"
         spec_text+="coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='Neos75-Fullscreen')\n"
         spec_text+="app = BUNDLE(coll, name='Neos75-Fullscreen.app', icon="+repr(str(ROOT/'desktop/ui/icon.icns'))+", bundle_identifier='io.github.hacker1232345.neos75fullscreen', info_plist={'CFBundleShortVersionString':'"+VERSION+"','NSHighResolutionCapable':True,'LSMinimumSystemVersion':'15.0'})\n"
+    else:
+        spec_text+="exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='Neos75-Fullscreen', debug=False, strip=False, upx=False, console=False)\n"
+        spec_text+="coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='Neos75-Fullscreen')\n"
     spec.write_text(spec_text,encoding='utf-8')
     cmd=[sys.executable,'-m','PyInstaller','--noconfirm','--distpath',str(a.dist),'--workpath',str(a.work/'pyinstaller'),str(spec)]
     subprocess.run(cmd,cwd=ROOT,check=True)
-    exe=a.dist/('Neos75-Fullscreen.exe' if sys.platform=='win32' else 'Neos75-Fullscreen.app/Contents/MacOS/Neos75-Fullscreen')
+    if sys.platform == 'linux':
+        bundle = a.dist/'Neos75-Fullscreen'
+        for file in (ROOT/'desktop/linux').iterdir():
+            if file.is_file():
+                shutil.copy2(file, bundle/file.name)
+        for name in ['Neos75', 'install-usb-access.sh', '_internal/runtime/node', '_internal/runtime/Neos75-Render']:
+            path = bundle/name
+            path.chmod(path.stat().st_mode | 0o111)
+    executable = {'win32':'Neos75-Fullscreen.exe', 'darwin':'Neos75-Fullscreen.app/Contents/MacOS/Neos75-Fullscreen', 'linux':'Neos75-Fullscreen/Neos75-Fullscreen'}
+    exe=a.dist/executable[sys.platform]
     info={'version':VERSION,'platform':sys.platform+'-'+platform.machine(),'bytes':exe.stat().st_size,'sha256':hashlib.sha256(exe.read_bytes()).hexdigest(),'node':version,'pyinstaller':subprocess.check_output([sys.executable,'-m','PyInstaller','--version'],text=True).strip()}
     (a.dist/'Neos75-Fullscreen.sha256.json').write_text(json.dumps(info,indent=2),encoding='utf-8')
     print(json.dumps(info))

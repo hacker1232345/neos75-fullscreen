@@ -95,6 +95,10 @@ _FONT_CANDIDATES = {
 
 
 def _first_font(kind):
+    root = Path(getattr(sys, '_MEIPASS', HERE.parent))
+    bundled = root / 'fonts/NotoSansCJK-Regular.ttc'
+    if kind != 'mono' and bundled.exists():
+        return str(bundled)
     for p in _FONT_CANDIDATES[kind]:
         if Path(p).exists():
             return p

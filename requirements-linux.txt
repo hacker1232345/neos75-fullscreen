@@ -1,0 +1,5 @@
+-r requirements-dev.txt
+# Qt 6.8 wheels support the Ubuntu 22.04 / glibc 2.35 build baseline.
+# Keep LGPL Qt/PySide libraries replaceable in the Linux directory bundle.
+PySide6==6.8.3
+QtPy==2.4.3

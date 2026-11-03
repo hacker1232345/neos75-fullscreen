@@ -1,0 +1,4 @@
+# Neos75 only. Grant the active local user access; never chmod every USB device.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="5542", ATTRS{idProduct}=="0001", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="5542", ATTR{idProduct}=="0001", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="5542", ATTR{idProduct}=="1000", TAG+="uaccess"

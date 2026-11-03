@@ -1,0 +1,28 @@
+Neos75 Linux x64
+
+支持目标：Ubuntu 22.04 / 24.04 及相近的 glibc 桌面发行版，x86_64。
+不支持 Alpine/musl；需要图形桌面、X11 或可用的 XWayland。
+
+解压后在这个目录运行：
+  ./Neos75
+
+首次连接键盘，如提示权限不足，只需安装一次专用规则：
+  sudo ./install-usb-access.sh
+重新插拔键盘后，以普通用户启动程序。不要 sudo 运行整个界面。
+规则只匹配 Neos75 的 5542:0001 应用接口与 5542:1000 DFU 接口。
+
+Qt、Python、Node 与中文字体随包提供，不必安装 Python/Node。
+如果精简系统缺少桌面库，在 Ubuntu / Debian 上安装：
+  sudo apt install libegl1 libopengl0 libnss3 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-image0 libxcb-render-util0 libasound2 libudev1 libusb-1.0-0 xdg-utils
+Ubuntu 24.04 可用 libasound2t64 替代 libasound2。
+
+全屏：点“一键全屏”，确认后自动备份、匹配、写入、回验。
+小组件：自由添加、移除、排序、保存；开始同步后才会上传到键盘。
+Linux 可采集 CPU、内存、时钟、网络、电池等基础信息；温度依赖内核传感器。
+GPU、音量等没有数据源时显示 n/a；无线传输尚未实现。
+
+备份与日志：${XDG_DATA_HOME:-~/.local/share}/Neos75/
+请保留备份，刷写期间不要拔线或强退。实机 USB/DFU 仍需 Linux 键盘现场验收。
+Qt/PySide 以独立动态库随目录分发，许可证位于 _internal/licenses。
+Qt/PySide 对应源码：https://code.qt.io/pyside/pyside-setup.git/?h=v6.8.3
+Qt 源码与许可：https://www.qt.io/download-qt-installer-oss

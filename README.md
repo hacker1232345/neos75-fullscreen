@@ -8,9 +8,9 @@
 
 ## 下载可执行程序
 
-当前分支正在准备 **v1.3.0 桌面新版**：简洁的玻璃风格界面，一个程序包含“一键全屏”和“小组件”。自动读取本机备份、匹配补丁并校验；组件可搜索添加、移除、排序、保存并自动分页。详见 [新版使用说明](docs/desktop-glass.md)。下方 Releases 链接仍指向已发布版本。
+**v1.3.0 桌面新版**：简洁的玻璃风格界面，一个程序包含“一键全屏”和“小组件”。自动读取本机备份、匹配补丁并校验；组件可搜索添加、移除、排序、保存并自动分页。新增 Linux x64 包，详见 [新版使用说明](docs/desktop-glass.md) 与 [更新内容](docs/release-v1.3.0.md)。
 
-[Windows / Apple 芯片 Mac / Intel Mac 下载](https://github.com/hacker1232345/neos75-fullscreen/releases/latest)。程序内置运行环境；Mac版支持macOS 15+，USB/DFU尚未在Mac真机验证。
+[Windows / Mac / Linux 下载](https://github.com/hacker1232345/neos75-fullscreen/releases/latest)。程序内置运行环境；Mac 支持 macOS 15+，Linux x64 以 Ubuntu 22.04/24.04 桌面为目标。Mac/Linux USB/DFU 尚待真机验收。
 
 v1.2.0 在原有全屏补丁之上加了一层可选的**屏幕部件**：把电脑的时钟、CPU、内存、网络等状态实时画成480×360图片推到屏幕上。补丁按备份哈希自动选择，**无需勾选“无验证”**。没有原始备份时，先点“从设备读取备份”；也可选择已有备份离线识别。Issue #1构建标明“离线适配，待实机验收”。未知构建默认拒绝，强制模式仍默认关闭。详见 [可执行程序说明](docs/desktop-release.md)。
 

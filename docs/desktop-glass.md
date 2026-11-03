@@ -1,4 +1,4 @@
-# Neos75 桌面新版（v1.3.0 开发版）
+# Neos75 桌面新版（v1.3.0）
 
 全屏补丁与键盘小组件放在同一个程序中。默认界面只保留这两个页面。
 
@@ -47,4 +47,14 @@ python desktop/ci_smoke.py
 
 浏览器验收：`python desktop/preview.py`，访问输出的 127.0.0.1 地址。此工具仅有界面、配置与预览端点，固件与 USB 操作禁用，配置在临时目录，不随桌面入口运行。
 
-三平台构建继续由 `.github/workflows/desktop.yml` 负责。新版本发布前需 Windows、macOS arm64、macOS x64 CI 通过。本地 Windows 构建不能代替 Mac 真机测试。
+四平台构建由 `.github/workflows/desktop.yml` 负责，发布依赖 Windows、macOS arm64、macOS x64、Linux x64 的源码测试及打包后检查全部通过。CI 的无设备检查不能代替 USB/DFU 真机测试。
+
+## Linux 使用
+
+下载 `Neos75-Linux-x64.tar.gz`，解压后在 `Neos75-Fullscreen` 目录执行 `./Neos75`。目标为 Ubuntu 22.04 / 24.04 等 glibc x86_64 桌面环境，不支持 ARM 或 musl。程序附带 Python、Node、Qt WebEngine 与中文字体；精简桌面可能仍需安装说明中列出的系统共享库。
+
+首次使用 USB 功能，在该目录执行 `sudo ./install-usb-access.sh`，然后重新插拔键盘。此操作只安装 Neos75 的专用 udev 权限规则；界面始终由普通用户运行，不关闭浏览器沙箱。请勿用 sudo 启动主程序。
+
+Linux 数据位于 `${XDG_DATA_HOME:-~/.local/share}/Neos75`，备份在其中的 `backups` 目录。温度取决于系统传感器支持，无数据时显示 n/a。Linux 与 Mac 的 USB、刷写和实际屏幕效果仍需对应系统真机验收。
+
+Linux 开发构建安装 `requirements-linux.txt`，并准备 `desktop/linux/使用说明.txt` 所列系统库及 Noto CJK 字体。打包采用目录形式，保留可替换的 Qt/PySide6 动态库与第三方许可。
