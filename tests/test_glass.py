@@ -5,11 +5,25 @@ import sys
 import tempfile
 import threading
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'desktop'))
 from glass import Api, load_renderer
+import glass
+
+
+class PortableSampler(unittest.TestCase):
+    def test_missing_cpu_frequency_keeps_other_metrics_available(self):
+        # psutil does not expose cpu_freq on Apple Silicon.
+        with patch.object(glass.sys, 'platform', 'darwin'), patch.dict(glass.psutil.__dict__):
+            glass.psutil.__dict__.pop('cpu_freq', None)
+            sampler = glass.Sampler()
+            self.addCleanup(sampler.close)
+            metrics = sampler.read()
+            self.assertIsNone(metrics['cpu_freq_ghz'])
+            self.assertIsInstance(metrics['cpu_load'], (float, int))
+            self.assertGreater(metrics['mem_total_gb'], 0)
 
 
 class GlassWorkflow(unittest.TestCase):

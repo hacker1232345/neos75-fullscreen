@@ -110,7 +110,10 @@ class Sampler:
         up = max(0, net.bytes_sent - self.net.bytes_sent) * 8 / elapsed / 1e6
         self.net, self.tick = net, tick
         bat = psutil.sensors_battery()
-        freq = psutil.cpu_freq()
+        try:
+            freq = getattr(psutil, 'cpu_freq', lambda: None)()
+        except (OSError, NotImplementedError, RuntimeError):
+            freq = None
         seconds = max(0, int(time.time() - psutil.boot_time()))
         ip = next((a.address for name, values in psutil.net_if_addrs().items()
                    if psutil.net_if_stats().get(name) and psutil.net_if_stats()[name].isup
