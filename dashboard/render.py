@@ -68,9 +68,44 @@ WARN = (245, 191, 79)
 BAD = (240, 92, 92)
 NA = (96, 104, 120)
 
-FONT_REG = r"C:\Windows\Fonts\msyh.ttc"
-FONT_BD = r"C:\Windows\Fonts\msyhbd.ttc"
-FONT_MONO = r"C:\Windows\Fonts\consola.ttf"
+# 字体：按平台探测。取不到就退回 Pillow 内置字体（中文会变方块，但不崩）。
+# Windows 用微软雅黑/Consolas；macOS 用苹方/Helvetica；Linux 用 Noto/DejaVu。
+_FONT_CANDIDATES = {
+    "reg": [
+        r"C:\Windows\Fonts\msyh.ttc",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ],
+    "bd": [
+        r"C:\Windows\Fonts\msyhbd.ttc",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ],
+    "mono": [
+        r"C:\Windows\Fonts\consola.ttf",
+        "/System/Library/Fonts/Menlo.ttc",
+        "/System/Library/Fonts/Monaco.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    ],
+}
+
+
+def _first_font(kind):
+    for p in _FONT_CANDIDATES[kind]:
+        if Path(p).exists():
+            return p
+    return None
+
+
+FONT_REG = _first_font("reg") or _FONT_CANDIDATES["reg"][0]
+FONT_BD = _first_font("bd") or FONT_REG
+FONT_MONO = _first_font("mono") or FONT_REG
+# 支持汉字的字体（用于 test 与 F() 的含汉字回退判断）
+FONT_CJK = FONT_REG
 
 HISTORY_KEEP = 60
 

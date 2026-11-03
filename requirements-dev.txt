@@ -1,2 +1,9 @@
+# Offline firmware/emulation tooling (tools/test_arm_emulation.py).
 capstone==5.0.9
 unicorn==2.1.4
+# Screen-widget renderer. dashboard/render.py imports PIL directly, so both the
+# source-mode tests (tests/test_dashboard.py, dashboard/selftest.js) and the
+# packaged build (desktop/build_exe.py freezes render.py into Neos75-Render)
+# depend on it. Kept ASCII-only on purpose: pip decodes this file with the
+# platform locale, and a non-ASCII comment breaks it under a GBK console.
+Pillow==12.3.0

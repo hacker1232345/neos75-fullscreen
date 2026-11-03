@@ -221,7 +221,18 @@ class RenderOutput(unittest.TestCase):
         f_latin=rd.F(20,'mono',text='ABCDEF')
         self.assertIsNotNone(f_cjk)
         self.assertIsNotNone(f_latin)
-        self.assertEqual(f_cjk.path,rd.FONT_REG,'含汉字时必须走 msyh，否则渲染成方块')
+        if not Path(rd.FONT_REG).exists():
+            self.skipTest('本机没有可用汉字字体，无法验证回退（不视为失败）')
+        self.assertEqual(f_cjk.path,rd.FONT_REG,'含汉字时必须走支持汉字的字体，否则渲染成方块')
+        if rd.FONT_MONO!=rd.FONT_REG:
+            self.assertNotEqual(f_latin.path,f_cjk.path,'纯 ASCII 走等宽字体，不必占用汉字字体')
+
+    def test_fonts_resolve_per_platform(self):
+        """字体不能写死 Windows 路径，否则 macOS/Linux 上中文全成方块。"""
+        for kind,path in [('reg',rd.FONT_REG),('bd',rd.FONT_BD),('mono',rd.FONT_MONO)]:
+            self.assertTrue(path,'%s 字体候选全空'%kind)
+            if sys.platform!='win32':
+                self.assertNotIn('C:\\\\Windows',path,'非 Windows 平台不应选中 Windows 字体路径')
 
 
 class Layout(unittest.TestCase):
