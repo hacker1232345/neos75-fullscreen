@@ -16,7 +16,7 @@ import zlib
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = '1.2.0'
+VERSION = '1.3.0'
 PROJECT = Path(sys._MEIPASS) / 'project' if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
 NODE = Path(sys._MEIPASS) / ('runtime/node.exe' if sys.platform == 'win32' else 'runtime/node') if getattr(sys, 'frozen', False) else Path(shutil.which('node') or 'node')
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
@@ -165,32 +165,8 @@ def cli(argv):
         if args.force and not (args.build or args.maintain):
             raise ValueError('--force仅用于生成全屏固件或固件维护')
         if args.gui_smoke:
-            app = App()
-            app.root.update()
-            options = [b for b in app.buttons if isinstance(b, ttk.Checkbutton)]
-            assert len(options) == 2 and not app.force.get()
-            assert all(b.cget('text') == '无验证，直接打补丁' for b in options)
-            options[0].invoke()
-            app.root.update()
-            assert app.force.get() and options[1].instate(['selected'])
-            options[1].invoke()
-            assert not app.force.get()
-            # 屏幕部件页：注册表必须能填进下拉、预设可套用、默认项与注册表一致
-            assert app.board_items and any(app.board_items), '部件列表为空'
-            assert app.board_list.size() > 5
-            registry = dash().registry()
-            assert set(registry['presets']) >= {'minimal', 'default', 'full', 'performance', 'network'}
-            assert set(app.selected_widgets()) == set(dash().default_widgets())
-            app.apply_preset('minimal')
-            app.root.update()
-            assert set(app.selected_widgets()) == set(registry['presets']['minimal'])
-            app.set_widgets([])
-            assert app.selected_widgets() == []
-            app.apply_preset('full')
-            app.root.update()
-            assert len(app.selected_widgets()) == len(registry['widgets'])
-            app.root.destroy()
-            data = {'result': 'PASS', 'gui': 'created and updated; force defaults off; both tabs share selection; board registry, presets and default selection verified', 'device_write': False}
+            from glass import run
+            data = run(smoke=True)
         elif args.self_test:
             data = self_test()
         elif args.backup:
@@ -704,4 +680,5 @@ class App:
 if __name__ == '__main__':
     if len(sys.argv) > 1:
         raise SystemExit(cli(sys.argv[1:]))
-    App().root.mainloop()
+    from glass import run
+    run()

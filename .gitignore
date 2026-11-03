@@ -17,3 +17,5 @@ __pycache__/
 /tmpout/
 *.partial
 /dashboard/.history/
+/build-ui-*.log
+/build-gui-smoke.json

@@ -427,9 +427,29 @@ def layout(ids):
     return boxes, info
 
 
+def paginate(ids):
+    """Keep each page at natural minimum heights; never shrink fifteen tiles to fit.
+
+    Uses the same layout solver as rendering, so gallery order is screen order.
+    Empty selections stay empty instead of silently restoring a preset.
+    """
+    pages, current = [], []
+    for wid in ids:
+        candidate = current + [wid]
+        boxes, info = layout(candidate)
+        if current and (info['scaled'] or info['overflow'] or len(candidate) > 6):
+            pages.append(current)
+            current = [wid]
+        else:
+            current = candidate
+    if current:
+        pages.append(current)
+    return pages
+
+
 def resolve_widgets(widgets=None, preset="default"):
     """--widgets 优先于 --preset。两者都没给就用 default 预设。"""
-    if widgets:
+    if widgets is not None:
         ids = [w.strip() for w in widgets if str(w).strip()]
         return ids
     if preset not in PRESETS:
@@ -564,7 +584,7 @@ def draw_history_cpu(d, b, st, ctx):
     hh = ch
     d.line([cx, y0 + hh, cx + cw, y0 + hh], fill=LINE)
     if len(hist) < 2:
-        put(d, (cx + cw / 2, y0 + hh / 2), "n/a（需要 --state-dir）",
+        put(d, (cx + cw / 2, y0 + hh / 2), "等待更多采样",
             max(8, min(13, int(ch * 0.5))), "reg", NA, anchor="mm")
         return
     vals = [h.get("cpu") for h in hist]

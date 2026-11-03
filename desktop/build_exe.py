@@ -9,6 +9,7 @@ import sys
 import urllib.request
 import urllib.error
 import platform
+from importlib.metadata import distribution, PackageNotFoundError
 
 ROOT=Path(__file__).resolve().parents[1]
 VERSION=json.loads((ROOT/'package.json').read_text(encoding='utf-8'))['version']
@@ -60,6 +61,16 @@ def main():
             with urllib.request.urlopen(license_url) as r:license_file.write_bytes(r.read())
         (a.work/'NODE-LICENSE-source.txt').write_text(license_url,encoding='utf-8')
     datas=[(str(node),'runtime'),(str(license_file),'licenses')]
+    for name in ['pywebview', 'psutil', 'Pillow', 'pythonnet', 'clr_loader',
+                 'proxy_tools', 'bottle', 'cffi', 'pycparser']:
+        try:
+            package_dist = distribution(name)
+        except PackageNotFoundError:
+            continue  # pythonnet/clr_loader are Windows-only webview dependencies.
+        entries = [f for f in (package_dist.files or []) if Path(f).name.upper() in ('LICENSE', 'LICENSE.TXT', 'COPYING')]
+        if not entries:
+            entries = [f for f in (package_dist.files or []) if str(f).endswith('.dist-info/METADATA')]
+        datas.extend((str(package_dist.locate_file(f)), 'licenses/' + name) for f in entries)
     # 随包渲染器：桌面版渲染屏幕部件时用它，不依赖目标机器的 Python/Pillow
     renderer=build_renderer(node,a.dist,a.work)
     datas.append((str(renderer),'runtime'))
@@ -79,13 +90,15 @@ def main():
         dest='project/desktop' if f.name=='native_check.js' else 'project'
         datas.append((str(f),dest))
     spec=a.work/'Neos75-Fullscreen.spec'
-    spec_text='a = Analysis('+repr([str(ROOT/'desktop/app.py')])+', pathex=[], binaries=[], datas='+repr(datas)+', hiddenimports=[], excludes=[])\npyz = PYZ(a.pure)\n'
+    # The webview hook collects WebView2/WKWebView runtime pieces. Pillow/psutil
+    # are explicit because the dashboard renderer is loaded from a fixed path.
+    spec_text='a = Analysis('+repr([str(ROOT/'desktop/app.py')])+', pathex='+repr([str(ROOT/'desktop')])+', binaries=[], datas='+repr(datas)+', hiddenimports=["glass", "webview", "psutil", "PIL.Image", "PIL.ImageDraw", "PIL.ImageFont"], excludes=[])\npyz = PYZ(a.pure)\n'
     if sys.platform=='win32':
-        spec_text+="exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name='Neos75-Fullscreen', debug=False, strip=False, upx=False, console=False)\n"
+        spec_text+="exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name='Neos75-Fullscreen', icon="+repr(str(ROOT/'desktop/ui/icon.ico'))+", debug=False, strip=False, upx=False, console=False)\n"
     else:
         spec_text+="exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='Neos75-Fullscreen', debug=False, strip=False, upx=False, console=False)\n"
         spec_text+="coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='Neos75-Fullscreen')\n"
-        spec_text+="app = BUNDLE(coll, name='Neos75-Fullscreen.app', bundle_identifier='io.github.hacker1232345.neos75fullscreen', info_plist={'CFBundleShortVersionString':'"+VERSION+"','NSHighResolutionCapable':True,'LSMinimumSystemVersion':'15.0'})\n"
+        spec_text+="app = BUNDLE(coll, name='Neos75-Fullscreen.app', icon="+repr(str(ROOT/'desktop/ui/icon.icns'))+", bundle_identifier='io.github.hacker1232345.neos75fullscreen', info_plist={'CFBundleShortVersionString':'"+VERSION+"','NSHighResolutionCapable':True,'LSMinimumSystemVersion':'15.0'})\n"
     spec.write_text(spec_text,encoding='utf-8')
     cmd=[sys.executable,'-m','PyInstaller','--noconfirm','--distpath',str(a.dist),'--workpath',str(a.work/'pyinstaller'),str(spec)]
     subprocess.run(cmd,cwd=ROOT,check=True)

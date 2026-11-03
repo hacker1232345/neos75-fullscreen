@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'">
+  <title>Neos75</title><link rel="stylesheet" href="style.css"><script src="app.js" defer></script>
+</head>
+<body>
+<div class="ambient" aria-hidden="true"></div>
+<div class="shell">
+  <header><div class="brand"><span class="brand-mark" aria-hidden="true">N<span>75</span></span><div>Neos75<small>全屏补丁 · 键盘小组件</small></div></div>
+    <button class="connection glass" id="connect"><span class="dot" id="connection-dot"></span><span id="connection-label">检测键盘</span><span class="refresh" aria-hidden="true">↻</span></button>
+  </header>
+  <nav class="tabs glass" aria-label="功能"><button id="tab-fullscreen" class="selected" aria-current="page">全屏补丁</button><button id="tab-widgets">小组件</button></nav>
+  <main>
+    <section id="fullscreen" aria-labelledby="full-title">
+      <div class="intro"><p class="eyebrow">图片 / GIF</p><h1 id="full-title">图片与 GIF，全屏显示。</h1><p class="subtitle">让图片与 GIF 铺满键盘屏幕。<br>连接 USB，剩下的交给我们。</p>
+        <button class="primary" id="patch"><span aria-hidden="true">↗</span> 一键全屏</button>
+        <p class="quiet">自动备份 · 匹配固件 · 写入校验</p>
+      </div>
+      <div class="full-art" aria-label="图片和 GIF 全屏效果示意">
+        <div class="screen-case"><div class="wallpaper"><div class="sun"></div><div class="mountain back"></div><div class="mountain front"></div><div class="wallpaper-label"><span>整块屏幕，都是画布</span><strong>480 × 360</strong></div></div></div>
+        <div class="art-caption"><span class="mini-icon" aria-hidden="true">▧</span> 图片 <span class="caption-divider"></span><span class="mini-icon" aria-hidden="true">▷</span> GIF 动画 <span class="illustration">效果示意</span></div>
+      </div>
+    </section>
+    <section id="widgets" aria-labelledby="widgets-title" hidden>
+      <div class="widget-heading"><div><p class="eyebrow">键盘小屏</p><h1 id="widgets-title">自由组合小组件</h1><p class="subtitle">选几个常用组件，放进键盘小屏。</p></div><button class="secondary glass" id="add-widget"><span aria-hidden="true">＋</span> 添加组件</button></div>
+      <div class="widget-layout">
+        <div class="editor"><div class="editor-heading"><h2>已添加 <span id="widget-count">0</span></h2><label class="sr-only" for="preset">组件预设</label><select id="preset"><option value="custom">自定义</option><option value="minimal">日常</option><option value="performance">性能</option><option value="network">网络</option><option value="default">常用组合</option><option value="full">全部组件</option></select></div>
+          <p id="empty" class="empty" hidden>小屏还空着。<br><button class="text-button" id="empty-add">添加第一个组件</button></p>
+          <ol id="widget-list" aria-label="组件顺序"></ol>
+          <div class="interval-row"><label for="interval">刷新间隔</label><select id="interval"><option value="3">3 秒</option><option value="5">5 秒</option><option value="10">10 秒</option></select></div>
+          <p class="hint">组件较多时自动分页轮播，保持文字清晰。</p>
+        </div>
+        <div class="preview-column"><div class="preview-heading"><h2>屏幕预览</h2><button class="icon-button" id="preview-refresh" aria-label="刷新电脑数据与预览">↻</button></div>
+          <div class="screen-case preview-case"><div class="preview-surface"><img id="preview-image" width="480" height="360" alt="键盘小组件实际渲染预览" hidden><p id="preview-placeholder">添加组件，预览你的小屏</p></div></div>
+          <div class="pages"><button class="icon-button" id="prev-page" aria-label="上一页">‹</button><span id="page-label">480 × 360</span><button class="icon-button" id="next-page" aria-label="下一页">›</button></div>
+          <div class="sync-row"><button class="primary" id="sync">开始同步</button><span class="hint" id="sync-note">通过 USB 同步到键盘</span></div>
+          <p class="sensor-note">预览使用本机数据。温度等传感器无法读取时显示 n/a。</p>
+        </div>
+      </div>
+    </section>
+    <div class="status" id="status" role="status" aria-live="polite"><div class="status-icon" id="status-icon" aria-hidden="true">·</div><div><strong id="status-title">准备就绪</strong><p id="status-message">连接键盘后即可开始。</p><progress id="progress" max="100" value="0" hidden aria-label="补丁进度"></progress></div></div>
+  </main>
+  <footer><div><button class="text-button" id="backup-settings">备份与恢复</button><span>·</span><button class="text-button" id="diagnostic">诊断</button></div><span id="version">Neos75</span></footer>
+</div>
+<dialog id="catalog" aria-labelledby="catalog-title"><div class="dialog-header"><div><p class="eyebrow">小组件库</p><h2 id="catalog-title">添加你关心的信息</h2></div><button class="icon-button close" aria-label="关闭组件库">×</button></div><label class="sr-only" for="search">搜索组件</label><input id="search" type="search" placeholder="搜索组件…" autocomplete="off"><div id="catalog-list"></div><p class="hint">添加后可用上下按钮调整显示顺序。</p></dialog>
+<dialog id="confirmation" aria-labelledby="confirm-title"><div class="dialog-header"><h2 id="confirm-title">应用全屏补丁</h2><button class="icon-button close" aria-label="取消操作">×</button></div><p id="confirm-copy"></p><p class="callout" id="confirm-callout">请使用 USB 数据线直连，关闭官方程序。写入期间不要拔线或退出。</p><div class="dialog-actions"><button class="secondary close">取消</button><button class="primary" id="confirm-action">备份并应用</button></div></dialog>
+<dialog id="settings" aria-labelledby="settings-title"><div class="dialog-header"><h2 id="settings-title">备份与恢复</h2><button class="icon-button close" aria-label="关闭备份设置">×</button></div><p>不需要事先准备固件。每次应用补丁前，程序会自动读取并双重校验这把键盘的完整固件。</p><button class="secondary" id="open-backups">打开备份文件夹 ↗</button><p class="path" id="backup-path"></p><hr><h3>恢复上次备份</h3><p>恢复最近一次应用补丁前的状态。请连接同一把键盘。</p><button class="secondary" id="restore">恢复备份</button><details><summary>高级选项</summary><label class="check-row"><input id="force" type="checkbox">无验证，直接打补丁</label><p class="warning">跳过固件版本和旧字节检查，固定偏移可能不兼容。自动备份和写后回验仍保留。仅在确认兼容性时使用。</p></details></dialog>
+<dialog id="diagnostics" aria-labelledby="diagnostics-title"><div class="dialog-header"><h2 id="diagnostics-title">诊断记录</h2><button class="icon-button close" aria-label="关闭诊断">×</button></div><p class="hint">提交问题前请检查记录中的本机路径等个人信息。</p><pre id="log"></pre><button class="secondary" id="copy-log">复制记录</button></dialog>
+<div class="toast" id="toast" role="status" hidden></div>
+</body></html>

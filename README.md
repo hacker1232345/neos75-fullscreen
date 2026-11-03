@@ -1,4 +1,4 @@
-# AULA Neos75 图片 / GIF 全屏补丁
+# AULA Neos75 全屏补丁与键盘小组件
 
 把官方自定义媒体页从右侧320×320区域扩展为 **480×360全屏**，隐藏左侧状态条。2026-11-02已在一台Neos75上刷入并逐字节回验，用户确认：**图片和GIF都全屏正常**。
 
@@ -7,6 +7,8 @@
 上图是生成的验收素材，非屏幕实拍。实机确认见 [验收记录](evidence/user-acceptance.json)。
 
 ## 下载可执行程序
+
+当前分支正在准备 **v1.3.0 桌面新版**：简洁的玻璃风格界面，一个程序包含“一键全屏”和“小组件”。自动读取本机备份、匹配补丁并校验；组件可搜索添加、移除、排序、保存并自动分页。详见 [新版使用说明](docs/desktop-glass.md)。下方 Releases 链接仍指向已发布版本。
 
 [Windows / Apple 芯片 Mac / Intel Mac 下载](https://github.com/hacker1232345/neos75-fullscreen/releases/latest)。程序内置运行环境；Mac版支持macOS 15+，USB/DFU尚未在Mac真机验证。
 

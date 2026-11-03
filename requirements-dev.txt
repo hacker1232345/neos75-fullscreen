@@ -7,3 +7,5 @@ unicorn==2.1.4
 # depend on it. Kept ASCII-only on purpose: pip decodes this file with the
 # platform locale, and a non-ASCII comment breaks it under a GBK console.
 Pillow==12.3.0
+pywebview==6.2.1
+psutil==7.2.2
