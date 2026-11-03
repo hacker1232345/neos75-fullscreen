@@ -10,6 +10,7 @@ import urllib.request
 import urllib.error
 import platform
 import os
+import time
 from importlib.metadata import distribution, PackageNotFoundError
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -34,6 +35,34 @@ def linux_fonts():
     if license_file.exists():
         result.append((str(license_file), 'licenses/NotoSansCJK'))
     return result
+
+
+def node_license(node, version, work):
+    """Prefer the exact installed Node distribution's license, avoiding CI DNS."""
+    destination = work / 'NODE-LICENSE.txt'
+    executable = Path(node).resolve()
+    candidates = [executable.parent / 'LICENSE']
+    if executable.parent.name == 'bin':
+        candidates.append(executable.parent.parent / 'LICENSE')
+    for candidate in candidates:
+        if candidate.is_file() and 'Node.js' in candidate.read_text(encoding='utf-8'):
+            shutil.copy2(candidate, destination)
+            (work / 'NODE-LICENSE-source.txt').write_text(str(candidate), encoding='utf-8')
+            return destination
+    url = f'https://raw.githubusercontent.com/nodejs/node/{version}/LICENSE'
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                data = response.read()
+            if b'Node.js' not in data:
+                raise ValueError('Unexpected Node license response')
+            destination.write_bytes(data)
+            (work / 'NODE-LICENSE-source.txt').write_text(url, encoding='utf-8')
+            return destination
+        except urllib.error.URLError:
+            if attempt == 2:
+                raise
+            time.sleep(2 ** attempt)
 
 def build_renderer(node, dist, work):
     """把 dashboard/render.py 单独冻结成一个可执行渲染器，放进 runtime/。
@@ -72,17 +101,7 @@ def main():
     # Include the runtime's own license; source builds obtain it from the official release.
     version=subprocess.check_output([node,'--version'],text=True).strip()
     node_arch=subprocess.check_output([node,'-p','process.arch'],text=True).strip()
-    license_file=a.work/'NODE-LICENSE.txt'
-    if not license_file.exists():
-        license_url=f'https://raw.githubusercontent.com/nodejs/node/{version}/LICENSE'
-        try:
-            with urllib.request.urlopen(license_url) as r:license_file.write_bytes(r.read())
-        except urllib.error.HTTPError as e:
-            if e.code!=404:raise
-            major=version.split('.')[0]
-            license_url=f'https://raw.githubusercontent.com/nodejs/node/{major}.x/LICENSE'
-            with urllib.request.urlopen(license_url) as r:license_file.write_bytes(r.read())
-        (a.work/'NODE-LICENSE-source.txt').write_text(license_url,encoding='utf-8')
+    license_file=node_license(node, version, a.work)
     datas=[(str(node),'runtime'),(str(license_file),'licenses'), *linux_fonts()]
     for name in ['pywebview', 'psutil', 'Pillow', 'pythonnet', 'clr_loader',
                  'proxy_tools', 'bottle', 'cffi', 'pycparser', 'PySide6',

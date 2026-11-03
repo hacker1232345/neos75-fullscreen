@@ -2,7 +2,9 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'">
+  <!-- pywebview 6.2 generates bridge functions dynamically. Only bundled scripts
+       may load; the style hash permits its fixed text-selection stylesheet. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; script-src 'self' 'unsafe-eval'; style-src 'self' 'sha256-RoIvEyQwR8x7XAq0wvZTfMiswRYjOD0c8DenZVf2Kss='; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'">
   <title>Neos75</title><link rel="stylesheet" href="style.css"><script src="app.js" defer></script>
 </head>
 <body>
