@@ -61,6 +61,16 @@ node   dashboard/push.js loop --preset default --interval 3000
 
 桌面程序新增第4页「屏幕部件」：勾选部件 → 采样并预览 → 推送一帧 / 连续推送。采样与渲染完全不碰USB，只有推送才连接键盘。
 
+## 下载
+
+| 平台 | 产物 |
+| --- | --- |
+| Windows x64 | `Neos75-Windows-x64.exe` |
+| macOS Apple 芯片 | `Neos75-macOS-arm64.zip` |
+| macOS Intel | `Neos75-macOS-x64.zip` |
+
+本版是**第一个带上屏幕部件页的发布版**。v1.2.0 的第一次 tag 推送（`c9cabb3`）在 CI 上三个平台全挂、`release` 被 skip，没有产出任何下载文件；原因见 [屏幕部件复盘](dashboard-retrospective.md) 的「绕了远路的地方」。
+
 ## 已知限制
 
 - **温度在本机读不到**：`Win32_PerfFormattedData_Counters_ThermalZoneTemperature` 与 `root/wmi MSAcpi_ThermalZoneTemperature` 均无数据，`temp_c` 恒为 `null`，界面上显示 `n/a`。不填假数据。
@@ -71,6 +81,8 @@ node   dashboard/push.js loop --preset default --interval 3000
 
 ## 验证
 
-`npm test` 6个套件全部通过（传输、备份、壁纸协议23组、强制刷写模型、补丁链、屏幕部件13组）。`python -m unittest discover -s tests -v` 全部通过。`--self-test` 10项通过（新增 `board_selftest`、`board_registry`），`--gui-smoke` 通过并新增部件注册表与预设断言。全部使用合成数据，不包含设备转储。
+`npm test` 6个套件全部通过（传输、备份、壁纸协议23组、强制刷写模型、补丁链、屏幕部件13组）。`python -m unittest discover -s tests -v` 57项全部通过。`--self-test` 10项通过（新增 `board_selftest`、`board_registry`），`--gui-smoke` 通过并新增部件注册表与预设断言。全部使用合成数据，不包含设备转储。
+
+CI 在 Windows x64、macOS arm64、macOS x64 三个平台各自跑完 `npm test` + `unittest` + 打包 + `ci_smoke.py`，全部成功。以上的本地验证也在一个**只装 `requirements-dev.txt` 与 pyinstaller 的干净 venv** 里完整复跑过一遍 —— 因为「本地全绿」曾经掩盖了 CI 缺 Pillow 的问题，现在把它当成发版前的固定动作。
 
 复盘与五列风险表见 [屏幕部件复盘](dashboard-retrospective.md) 与 [项目复盘](retrospective.md)。
