@@ -28,6 +28,8 @@ try:
             subprocess.run([str(exe),arg,'--result-file',str(result)],env=env,check=True)
             data=json.loads(result.read_text(encoding='utf-8'))
             assert data['ok'] and data['result']=='PASS',data
+            if label == 'selftest':
+                assert data['version'] == json.loads((root / 'package.json').read_text(encoding='utf-8'))['version'], data
             print(label,json.dumps(data,ensure_ascii=True))
         bad=Path(t)/'bad.json'
         p=subprocess.run([str(exe),'--maintain','flash','--baseline','missing','--target','missing','--result-file',str(bad)],env=env)

@@ -16,8 +16,8 @@ import zlib
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-VERSION = '1.3.0'
 PROJECT = Path(sys._MEIPASS) / 'project' if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[1]
+VERSION = json.loads((PROJECT / 'package.json').read_text(encoding='utf-8'))['version']
 NODE = Path(sys._MEIPASS) / ('runtime/node.exe' if sys.platform == 'win32' else 'runtime/node') if getattr(sys, 'frozen', False) else Path(shutil.which('node') or 'node')
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 URL = 'https://github.com/hacker1232345/neos75-fullscreen'
