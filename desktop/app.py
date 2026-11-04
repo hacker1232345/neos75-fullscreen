@@ -72,7 +72,9 @@ def generate(source, destination, overwrite=False, force=False):
             'appliedProfiles': m.get('appliedProfiles', [m['profile']]), 'appliedLabels': m.get('appliedLabels', [m['label']]),
             # force 时这两项说明「到底套上了几层」：matched=逐条旧字节核对通过，
             # blind=一层都没对上、只按链首固定地址盲套（此时进度条多半还在）。
-            'forceLayersMatched': bool(m.get('forceLayersMatched')), 'forceBlind': bool(m.get('forceBlind'))}
+            'forceLayersMatched': bool(m.get('forceLayersMatched')), 'forceBlind': bool(m.get('forceBlind')),
+            # 未知固件走了内容锚点自动适配：偏移是现算的，报给刷写端核对产物本身。
+            'adapted': bool(m.get('adapted'))}
 
 
 def node_run(script, args=(), baseline=None, on_line=None):
@@ -104,12 +106,16 @@ def maintain(mode, baseline, target, yes=False, on_line=None, force=False):
         raise ValueError('未知维护操作')
     if mode in ['flash', 'restore'] and not yes:
         raise ValueError('刷写或恢复需要明确确认，未连接设备。')
-    validate_firmware(baseline, target, force=force)
+    meta = validate_firmware(baseline, target, force=force)
     args = [mode, str(Path(target).resolve()), str(Path(baseline).resolve())]
     if yes:
         args.append('--yes')
     if force:
         args.append('--force')
+    if meta.get('adapted'):
+        # 适配产物是 Python 侧按锚点现算出来的，Node 那边只有固定偏移，重算必然不等。
+        # 把产物的 sha256 交过去，让它核对文件本身而不是重算。
+        args.extend(['--expect', meta['target_sha256']])
     return node_run('tools/mcu_flash_live.js', args, baseline=baseline, on_line=on_line)
 
 

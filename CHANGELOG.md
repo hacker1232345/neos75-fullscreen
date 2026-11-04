@@ -1,5 +1,34 @@
 # 更新记录
 
+## v1.7.0 — 2026-11-04
+
+修一个把普通人挡在门外的分支：哈希不认识的固件，桌面程序以前直接报「设备固件不匹配」，
+于是他们只能去勾「无验证」——而强制模式盲套固定地址，**上传进度条就留在屏幕上**。
+v1.6.0 做的内容锚点适配只存在于命令行，桌面这条路没接上。
+
+- **生成器接上适配器**（`tools/build_fullscreen.py`）：`patch()` 在 `unsupported-version` /
+  `already-fullscreen` 时不再早退，先调 `adapt()` → `adapt_firmware.build_adapted()`。
+  成功返回 `adapted=True` + 现算出的 `target_sha256`；失败时用 `_adapt_reason()` 把
+  各层的 blocker 压成一句人话（签名对不上 / 布局差得远 / 旧字节位置被改），而不是一句
+  「不匹配」。
+  - 兄弟模块定位改成 `Path(__file__).resolve().parent`：以前用 `ROOT`，测试把
+    `build_fullscreen.py` 连同临时清单一起加载时 `ROOT` 指向临时目录，拼出来的
+    `adapt_firmware.py` 并不存在（`test_profiles` 两个用例因此报 FileNotFoundError）。
+- **刷写端改为核对产物而不是重算**（`tools/mcu_flash_live.js`，新增 `--expect <sha256>`）：
+  Node 只有固定偏移，重算必然算不出适配产物。现在校验「文件本身」——SHA256 与生成端
+  报的一致、尾部 4096 字节现场数据未动、前 256 字节向量表未动、有差异的扇区落在已知
+  补丁扇区白名单内。这四条**上移到所有模式之前**，所以 `plan` 只读预检同样受保护。
+- **界面文案**：擦除前提示「已按锚点自动适配，进度条同样会被去掉」；`_friendly()` 不再
+  把适配器给出的人话盖成「操作已停止」。
+- 测试：`tests/test_adapt.py::BuilderWiring` 3 项（未知固件必须适配、尺寸不对仍拒绝、
+  垃圾镜像给可读原因）；`test_glass.py` 的旧用例改名
+  `test_unknown_firmware_is_still_adapted_instead_of_refused`（反过来钉死「不许再拒绝」），
+  并新增 `test_unadaptable_firmware_keeps_the_backup_and_never_writes`（套不上时不刷、备份留、
+  报错含原因）。全量 **125 项 Python + 8 组 node 全绿**。
+- 实测：clean 镜像插 0x400 字节后自动适配 `changed=2369`、`adapted=true`、尾部未动；
+  原版改版本字节后三层全套 `changed=2409`；四条负向用例（改尾部/改向量表/改未预期扇区/
+  文件被换）各自拒绝且文案点名。
+
 ## v1.6.0 — 2026-11-04
 
 同款键盘的固件版本五花八门，以前每来一份都要人工反汇编找新偏移、单独做一份 profile。

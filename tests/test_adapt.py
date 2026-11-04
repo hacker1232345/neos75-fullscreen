@@ -187,6 +187,56 @@ class IssueInput(unittest.TestCase):
         self.assertIsNone(I.find_url('我传了固件，但是忘了贴链接'))
 
 
+class BuilderWiring(unittest.TestCase):
+    """桌面程序真正走的那条路：build_fullscreen.patch() 在哈希不认识时必须自己适配。
+
+    v1.6.0 的自适应原本只做成了命令行工具，桌面程序照样抛「未找到对应固件配置」，
+    用户被迫去勾「无验证」——于是进度条留在屏幕上。这一组用例就是钉死那件事。
+    """
+
+    def setUp(self):
+        self.BF = load('build_fullscreen')
+
+    def base(self, code_sha):
+        for p in sorted(ROOT.parent.glob('widgetlab/*.bin')) + sorted(ROOT.parent.glob('mcu_out/*.bin')):
+            if p.stat().st_size not in (PAYLOAD, PAYLOAD + 16):
+                continue
+            if hashlib.sha256(p.read_bytes()[:CODE]).hexdigest() == code_sha:
+                return p.read_bytes()[:PAYLOAD]
+        return None
+
+    def shifted(self, img, at=0x9000, extra=0x400):
+        """在代码区中间塞一段 0xFF，末尾挤出同样多 —— 模拟「换了一份固件，布局整体后移」。"""
+        return (img[:at] + b'\xff' * extra + img[at:PAYLOAD - extra])[:PAYLOAD]
+
+    def test_unknown_image_is_adapted_instead_of_refused(self):
+        clean = next(L for L in A.layers() if L['profile'] == 'clean-8465dd63')
+        src = self.base(clean['target_code_sha256'])
+        if not src:
+            self.skipTest('本机没有清爽版整片镜像')
+        moved = self.shifted(src)
+        self.assertNotEqual(hashlib.sha256(moved[:CODE]).hexdigest(),
+                            hashlib.sha256(src[:CODE]).hexdigest())
+        out, meta = self.BF.patch(moved, force=False)      # 关键：不是 force
+        self.assertTrue(meta.get('adapted'), '未知固件必须走自动适配，而不是直接拒绝')
+        self.assertEqual(len(out), PAYLOAD + 16)
+        self.assertGreater(meta['changed_bytes'], 0)
+        # 尾部现场数据不许动
+        self.assertEqual(out[CODE:PAYLOAD], moved[CODE:PAYLOAD])
+
+    def test_build_still_refuses_a_bogus_sized_backup(self):
+        with self.assertRaises(ValueError):
+            self.BF.patch(bytes(PAYLOAD - 8), force=False)
+
+    def test_garbage_image_gets_a_readable_reason_not_a_stack(self):
+        junk = random.Random(23).randbytes(PAYLOAD)
+        with self.assertRaises(ValueError) as ctx:
+            self.BF.patch(junk, force=False)
+        msg = str(ctx.exception)
+        self.assertNotIn('Traceback', msg)
+        self.assertGreater(len(msg), 10)
+
+
 class RealImage(unittest.TestCase):
     """有真机镜头的机器上跑端到端；没有就跳过，别让 CI 因为缺文件挂掉。"""
 

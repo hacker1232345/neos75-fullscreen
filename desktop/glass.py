@@ -278,6 +278,11 @@ class Api:
 
     def _friendly(self, exc):
         text = str(exc)
+        # 适配器给出的已经是给用户看的人话（说明是哪一层卡住、为什么），
+        # 不能再用一句「操作已停止」把它盖掉 —— 那等于又把话说回去了。
+        if any(x in text for x in ('签名对不上', '差得比较远', '可能已经打过补丁',
+                                   '把小组件要用到的那几个厂商函数改过了', '为安全起见没有写入')):
+            return text
         if any(x in text for x in ('需且仅需', '未找到', '屏幕DFU不可用', '设备不匹配')):
             return '未能连接键盘。请用 USB 数据线直连，关闭官方程序后重试；详细原因见诊断。'
         if '不匹配' in text or '未知固件' in text:
@@ -549,10 +554,16 @@ class Api:
                 self._event(phase='done', title='已经是全屏固件', message='无需重复应用补丁，已保留本次备份。', progress=100)
                 return
             if not report.get('patchable') and not force:
-                raise ValueError('未知固件，已保留备份，未执行写入。')
+                # 哈希不认识不等于没救：生成这一步会按内容锚点现算偏移。
+                # 只有适配器确实一个字节都套不上时，generate() 才会抛出并写明原因。
+                self._line('固件版本不在已知清单里，改用内容锚点现算补丁位置。')
             self._event(title='正在匹配全屏补丁', message='保留本机配置，生成对应补丁。', progress=35, phase='prepare')
             result = self._core.generate(baseline, target, force=force)
             self._line(json.dumps(result, ensure_ascii=False))
+            if result.get('adapted'):
+                self._event(title='已按锚点自动适配', message='这份固件的布局和已知版本不一样，'
+                            '程序按内容锚点重新算出了每一处补丁的位置，进度条同样会被去掉。',
+                            progress=40, phase='prepare')
             # 强制模式的真实下限：一层补丁的旧字节都对不上时，只能盲套最基础的一层，
             # 而「去掉上传进度条」那几条补丁在更后面的一层里。既然用户已经勾了强制，
             # 就继续刷，但必须先把这件事说明白，不能让刷完才发现进度条还在。

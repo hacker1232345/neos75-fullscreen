@@ -74,13 +74,31 @@ class GlassWorkflow(unittest.TestCase):
         self.assertFalse(self.core.maintain.call_args.kwargs['force'])
         self.assertEqual(len(list(Path(self.temp.name).rglob('original.bin'))), 1)
 
-    def test_unknown_firmware_is_backed_up_but_not_written(self):
+    def test_unknown_firmware_is_still_adapted_instead_of_refused(self):
+        # v1.7 起「版本不认识」不再是终点：备份完之后仍然生成，偏移由内容锚点现算。
+        # 老版本在这里直接报「固件不匹配」把用户挡在外面，只能去勾「无验证」，
+        # 结果进度条留在了屏幕上 —— 这条用例就是防止那个行为回来。
         self.report.update(patchable=False, firmwareKind='unsupported-version')
         self.api.patch(True)
         self.wait()
-        self.core.generate.assert_not_called()
+        self.assertIn('generate', self.order)
+        self.assertEqual(self.order, ['tools/mcu_backup.js', 'generate', 'flash', 'tools/leave_mcu.js'])
+        self.assertEqual(self.api.snapshot()['state']['phase'], 'done')
+
+    def test_unadaptable_firmware_keeps_the_backup_and_never_writes(self):
+        # 适配器一个字节都套不上时（generate 抛错），必须停在生成这一步：
+        # 不刷、不擦，备份留着，并且报错要说清是哪一层卡住。
+        self.report.update(patchable=False, firmwareKind='unsupported-version')
+        def refuse(source, target, **kwargs):
+            self.order.append('generate')
+            raise ValueError('这份固件把小组件要用到的那几个厂商函数改过了（签名对不上）')
+        self.core.generate.side_effect = refuse
+        self.api.patch(True)
+        self.wait()
+        self.assertEqual(self.order, ['tools/mcu_backup.js', 'generate'])
         self.core.maintain.assert_not_called()
         self.assertEqual(self.api.snapshot()['state']['phase'], 'error')
+        self.assertIn('签名对不上', self.api.snapshot()['state']['message'])
         self.assertTrue(list(Path(self.temp.name).rglob('original.bin')))
 
     def test_incomplete_backup_and_already_current_never_write(self):

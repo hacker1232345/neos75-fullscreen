@@ -146,13 +146,63 @@ def firmware_info(source):
         'upgradeValidation':applicable['validation'] if kind=='upgradeable' else None,
     }
 
+def adapt(source):
+    """哈希没命中时，用内容锚点现算出每一层该打在哪。
+
+    返回 (payload, meta) 或 (None, report)。payload 是完整镜像（含 DFU 后缀）；
+    None 表示一条链都走不通，此时 report 里有每一层卡在哪、为什么。
+    """
+    import importlib.util as _ilu
+    # 兄弟模块要按「本文件所在目录」找，不能用 ROOT：测试会把 build_fullscreen.py
+    # 连同临时清单一起加载，ROOT 那时指向临时目录，拼出来的 adapt_firmware.py 并不存在。
+    spec=_ilu.spec_from_file_location('neos75_adapt',Path(__file__).resolve().parent/'adapt_firmware.py')
+    mod=_ilu.module_from_spec(spec);spec.loader.exec_module(mod)
+    payload,report,chain,meta=mod.build_adapted(source)
+    return payload,meta or {'adaptReport':report,'adaptChain':chain}
+
+def _adapt_reason(report):
+    """把适配报告压成一句人话，直接显示给用户 —— 别让他只看到一句「不匹配」。"""
+    if not report:
+        return None
+    blocked=[L for L in report.get('layers',())  if L['verdict']=='blocked']
+    partial=[L for L in report.get('layers',())  if L['verdict']=='partial']
+    if not blocked and not partial:
+        return None
+    kinds=sorted({b['kind'] for L in blocked+partial for b in L.get('blockers',())})
+    if 'injection' in kinds and 'unresolved' in kinds:
+        return ('这份固件把小组件要用到的那几个厂商函数改过了（签名对不上），'
+                '没法在不碰原厂逻辑的前提下把功能塞进去。补丁未做任何写入。')
+    if 'unresolved' in kinds:
+        return ('这份固件的代码布局和所有已知版本都差得比较远，连作为定位线索的字节都找不到。'
+                '补丁未做任何写入；如果要试，只能用「无验证」模式，并且进度条可能去不掉。')
+    if 'mismatch' in kinds:
+        return ('在旧字节该出现的位置找到了不一样的内容：这份固件可能已经打过补丁，'
+                '或者被别的工具改过。请先把完整备份发上来。')
+    return ('这份固件有几层补丁套不上（' + '、'.join(kinds) + '），为安全起见没有写入。')
+
+
 def patch(source, force=False):
     source=bytes(source)
     applied,applicable,kind=identify(source)
     ms=manifests()
     if not force and not patchable(kind):
-        raise ValueError('备份长度或代码区域SHA256不匹配，未找到对应固件配置。' if kind=='unsupported-version'
-                         else '备份已是全屏版，不能作为原版生成补丁。')
+        # 哈希对不上不等于没救：v1.6.0 起这里改成先试「按内容锚点现算偏移」。
+        # 同一份固件只是布局迁移过（换批次/换编译），锚点照样能找回去，
+        # 用户不该被迫去勾「无验证」然后把进度条留在屏幕上。
+        payload,meta=adapt(source)
+        if payload:
+            return payload,{**meta,
+                            'profile':meta['appliedProfiles'][-1],
+                            'label':meta.get('label','自动适配'),
+                            'validation':meta.get('validation','content-anchored'),
+                            'target_sha256':hashlib.sha256(payload).hexdigest(),
+                            'changed_bytes':meta.get('changed_bytes',0),
+                            'force':False,'appliedLabels':meta.get('appliedLabels',meta['appliedProfiles']),
+                            'forceLayersMatched':False,'forceBlind':False,'adapted':True}
+        why=_adapt_reason(meta.get('adaptReport') or {})
+        if kind=='already-fullscreen':
+            raise ValueError(why or '备份已是全屏版，不能作为原版生成补丁。')
+        raise ValueError(why or '备份长度或代码区域SHA256不匹配，未能自动适配。')
     # 正常路径：按哈希衔接。
     # 强制路径：先试后写（逐层核对旧字节，对得上才应用）；一层都对不上才退回「只套链首」。
     matched=True
