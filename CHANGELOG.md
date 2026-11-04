@@ -18,13 +18,27 @@ v1.6.0 做的内容锚点适配只存在于命令行，桌面这条路没接上�
   Node 只有固定偏移，重算必然算不出适配产物。现在校验「文件本身」——SHA256 与生成端
   报的一致、尾部 4096 字节现场数据未动、前 256 字节向量表未动、有差异的扇区落在已知
   补丁扇区白名单内。这四条**上移到所有模式之前**，所以 `plan` 只读预检同样受保护。
-- **界面文案**：擦除前提示「已按锚点自动适配，进度条同样会被去掉」；`_friendly()` 不再
-  把适配器给出的人话盖成「操作已停止」。
-- 测试：`tests/test_adapt.py::BuilderWiring` 3 项（未知固件必须适配、尺寸不对仍拒绝、
-  垃圾镜像给可读原因）；`test_glass.py` 的旧用例改名
-  `test_unknown_firmware_is_still_adapted_instead_of_refused`（反过来钉死「不许再拒绝」），
-  并新增 `test_unadaptable_firmware_keeps_the_backup_and_never_writes`（套不上时不刷、备份留、
-  报错含原因）。全量 **125 项 Python + 8 组 node 全绿**。
+- **别在擦除前空口承诺**：去进度条那一层在链中间，适配器可能只套上了后面的注入层。
+  所以新增 `progress_removed()` 判定并把 `progressRemoved` 一路传到界面：真套上了才说
+  「进度条同样会被去掉」，漏了就说「但还是没能套上去进度条那一层，浏览器上传时进度条会保留」，
+  完成标题也跟着变成「补丁已完成（进度条仍在）」。`_friendly()` 不再把适配器给出的人话
+  盖成「操作已停止」。
+- **打包补上两个隐藏依赖**（`desktop/build_exe.py`）：`tools/build_widget.py` 是运行时
+  importlib 加载的，里面用 keystone 重新汇编分支、用 capstone 校验，PyInstaller 静态分析
+  看不见 —— 打包版一碰到陌生固件就报 `No module named 'keystone'`。现在用
+  `collect_dynamic_libs()` 把 `keystone.dll`、`capstone.dll` 一起带上，体积从 103.5 MB
+  涨到 106.1 MB。
+- **链里「改动量」不能相加**：`widget` 把页掩码写成 `0x3f`、`widget-none` 再改成 `0`，
+  两层改的是同一批字节，求和必然虚高，旧校验 `changed == 每层之和` 在 clean 镜像上直接失败。
+  改成「不得超过各层之和」，产物对不对仍由那条 `target_code_sha256` 说了算。
+- **已经是最新版就别去试适配**：链末镜像的空闲带已被占用，跑适配器会抛
+  `命令表 0x3D 项与预期不符`，用户看到的是内部错误。改成在 `already-fullscreen` 时先说
+  「备份已是全屏版」。
+- 测试：`tests/test_adapt.py::BuilderWiring` 5 项（未知固件必须适配、进度条去没去要说得准、
+  已是最新版要给人话而不是内部错误、尺寸不对仍拒绝、垃圾镜像给可读原因）；`test_glass.py`
+  的旧用例改名 `test_unknown_firmware_is_still_adapted_instead_of_refused`（反过来钉死
+  「不许再拒绝」），并新增 `test_unadaptable_firmware_keeps_the_backup_and_never_writes`
+  （套不上时不刷、备份留、报错含原因）。全量 **127 项 Python + 8 组 node 全绿**。
 - 实测：clean 镜像插 0x400 字节后自动适配 `changed=2369`、`adapted=true`、尾部未动；
   原版改版本字节后三层全套 `changed=2409`；四条负向用例（改尾部/改向量表/改未预期扇区/
   文件被换）各自拒绝且文案点名。

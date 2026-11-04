@@ -224,6 +224,29 @@ class BuilderWiring(unittest.TestCase):
         # 尾部现场数据不许动
         self.assertEqual(out[CODE:PAYLOAD], moved[CODE:PAYLOAD])
 
+    def test_adapted_result_says_whether_the_progress_ring_is_gone(self):
+        # 「去掉上传进度条」那一层在链中间。适配跳过它却仍说「适配成功」，
+        # 用户刷完就会看到进度条还在 —— 这个字段就是用来在擦除前把话说准的。
+        clean = next(L for L in A.layers() if L['profile'] == 'clean-8465dd63')
+        src = self.base(clean['target_code_sha256'])
+        if not src:
+            self.skipTest('本机没有清爽版整片镜像')
+        moved = self.shifted(src)
+        out, meta = self.BF.patch(moved, force=False)
+        self.assertIs(meta['progressRemoved'], True, '适配成功时进度条必须已经被去掉')
+
+    def test_an_already_patched_image_says_so_instead_of_failing_inside(self):
+        # 链末镜像的空闲带已被占用，再去跑适配器会抛内部错误（命令表项不符）。
+        # 用户应该看到「已经是最新版」，而不是一句看不见懂的异常。
+        q = self.base('ec412e092dc8a64278bf3f6c262296de204a1a8051bf3c0b518eda5032bd0154')
+        if not q:
+            self.skipTest('本机没有默认关闭版整片镜像')
+        with self.assertRaises(ValueError) as ctx:
+            self.BF.patch(q, force=False)
+        msg = str(ctx.exception)
+        self.assertIn('已是全屏版', msg)
+        self.assertNotIn('0x3D', msg)
+
     def test_build_still_refuses_a_bogus_sized_backup(self):
         with self.assertRaises(ValueError):
             self.BF.patch(bytes(PAYLOAD - 8), force=False)

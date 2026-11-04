@@ -158,7 +158,11 @@ def adapt(source):
     spec=_ilu.spec_from_file_location('neos75_adapt',Path(__file__).resolve().parent/'adapt_firmware.py')
     mod=_ilu.module_from_spec(spec);spec.loader.exec_module(mod)
     payload,report,chain,meta=mod.build_adapted(source)
-    return payload,meta or {'adaptReport':report,'adaptChain':chain}
+    got = dict(meta) if meta else {}
+    # 报告一定要带出去：上层还要用它判断「去进度条那一层到底套上没有」。
+    got['adaptReport'] = report
+    got['adaptChain'] = chain
+    return payload, got
 
 def _adapt_reason(report):
     """把适配报告压成一句人话，直接显示给用户 —— 别让他只看到一句「不匹配」。"""
@@ -181,11 +185,34 @@ def _adapt_reason(report):
     return ('这份固件有几层补丁套不上（' + '、'.join(kinds) + '），为安全起见没有写入。')
 
 
+def progress_removed(meta):
+    """去进度条那一层（clean）到底是「已经打过」还是「这次套上了」。
+
+    两者都算成功。只有它落在 blocked/partial、又被别的层绕过时，进度条才会留着 ——
+    这种情况必须如实告诉用户，不能因为整体「适配成功」就说进度条没了。
+    """
+    report = meta.get('adaptReport') or {}
+    applied = set(meta.get('appliedProfiles') or ())
+    for L in report.get('layers', ()):
+        profile = L.get('profile') or ''
+        if not profile.startswith('clean-'):
+            continue
+        if L.get('verdict') == 'applied' or profile in applied:
+            return True
+        return False
+    return None
+
+
 def patch(source, force=False):
     source=bytes(source)
     applied,applicable,kind=identify(source)
     ms=manifests()
     if not force and not patchable(kind):
+        # 已经是链末（这台机器早就刷过最新那版）：没有可再打的层，直接说清楚。
+        # 不能先去试适配 —— 已打过的镜像空闲带已被占用，适配器会抛「命令表 0x3D 项
+        # 与预期不符」，用户看到的就是一句莫名其妙的内部错误，而不是「已经是最新」。
+        if kind=='already-fullscreen':
+            raise ValueError('备份已是全屏版，不能作为原版生成补丁。')
         # 哈希对不上不等于没救：v1.6.0 起这里改成先试「按内容锚点现算偏移」。
         # 同一份固件只是布局迁移过（换批次/换编译），锚点照样能找回去，
         # 用户不该被迫去勾「无验证」然后把进度条留在屏幕上。
@@ -198,10 +225,9 @@ def patch(source, force=False):
                             'target_sha256':hashlib.sha256(payload).hexdigest(),
                             'changed_bytes':meta.get('changed_bytes',0),
                             'force':False,'appliedLabels':meta.get('appliedLabels',meta['appliedProfiles']),
-                            'forceLayersMatched':False,'forceBlind':False,'adapted':True}
+                            'forceLayersMatched':False,'forceBlind':False,'adapted':True,
+                            'progressRemoved':progress_removed(meta)}
         why=_adapt_reason(meta.get('adaptReport') or {})
-        if kind=='already-fullscreen':
-            raise ValueError(why or '备份已是全屏版，不能作为原版生成补丁。')
         raise ValueError(why or '备份长度或代码区域SHA256不匹配，未能自动适配。')
     # 正常路径：按哈希衔接。
     # 强制路径：先试后写（逐层核对旧字节，对得上才应用）；一层都对不上才退回「只套链首」。
@@ -236,8 +262,11 @@ def patch(source, force=False):
         raise ValueError('生成目标代码或配置保留校验不匹配')
     leaf=layers[-1]
     if not force:
-        expected=sum(m['changed_bytes'] for m in layers)
-        if (changed!=expected
+        # 各层改动量不能直接相加：链里存在「后一层只改前一层刚写下的那几个字节」的组合
+        # （widget 把页掩码写成 0x3f，widget-none 再把它改成 0），那些位置本来就已经不同了。
+        # 上界仍然是各层之和（差异不可能更多），真正确认产物对不对的是后面那条 SHA256。
+        ceiling=sum(m['changed_bytes'] for m in layers)
+        if (changed>ceiling
                 or hashlib.sha256(bytes(out[:code_bytes])).hexdigest()!=leaf['target_code_sha256']):
             raise ValueError('生成目标代码或配置保留校验不匹配')
     out.extend(bytes.fromhex(leaf['dfu_suffix_prefix_hex']))

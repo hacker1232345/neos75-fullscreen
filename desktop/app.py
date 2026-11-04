@@ -74,7 +74,9 @@ def generate(source, destination, overwrite=False, force=False):
             # blind=一层都没对上、只按链首固定地址盲套（此时进度条多半还在）。
             'forceLayersMatched': bool(m.get('forceLayersMatched')), 'forceBlind': bool(m.get('forceBlind')),
             # 未知固件走了内容锚点自动适配：偏移是现算的，报给刷写端核对产物本身。
-            'adapted': bool(m.get('adapted'))}
+            'adapted': bool(m.get('adapted')),
+            # 去进度条那一层到底套上没有：True=去掉了，False=没去掉，None=这次没走适配。
+            'progressRemoved': m.get('progressRemoved')}
 
 
 def node_run(script, args=(), baseline=None, on_line=None):

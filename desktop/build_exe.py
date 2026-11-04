@@ -12,6 +12,7 @@ import platform
 import os
 import time
 from importlib.metadata import distribution, PackageNotFoundError
+from PyInstaller.utils.hooks import collect_dynamic_libs
 
 ROOT=Path(__file__).resolve().parents[1]
 VERSION=json.loads((ROOT/'package.json').read_text(encoding='utf-8'))['version']
@@ -103,6 +104,7 @@ def main():
     node_arch=subprocess.check_output([node,'-p','process.arch'],text=True).strip()
     license_file=node_license(node, version, a.work)
     datas=[(str(node),'runtime'),(str(license_file),'licenses'), *linux_fonts()]
+    binaries=[]  # 运行时用 importlib 加载的模块（keystone/capstone）靠它带上动态库
     for name in ['pywebview', 'psutil', 'Pillow', 'pythonnet', 'clr_loader',
                  'proxy_tools', 'bottle', 'cffi', 'pycparser', 'PySide6',
                  'PySide6_Essentials', 'PySide6_Addons', 'shiboken6', 'QtPy']:
@@ -135,11 +137,21 @@ def main():
     spec=a.work/'Neos75-Fullscreen.spec'
     # The webview hook collects WebView2/WKWebView runtime pieces. Pillow/psutil
     # are explicit because the dashboard renderer is loaded from a fixed path.
-    hidden = ['glass', 'webview', 'psutil', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont']
+    # tools/build_widget.py 是在运行时用 importlib 加载的（适配未知固件时要重新汇编注入层），
+    # PyInstaller 的静态分析看不见它里面的 `from keystone import Ks` 和 `from capstone import Cs`。
+    # 少了这两个包，打包版一碰到不认识的固件就会死于 "No module named 'keystone'"。
+    # 动态库要和模块放在同一层：这两个包都按自己 __file__ 的位置去找 .dll。
+    for module in ('keystone', 'capstone'):
+        try:
+            binaries.extend(collect_dynamic_libs(module))
+        except Exception as exc:                  # pragma: no cover - 打包前的提示
+            raise SystemExit('打包需要 %s：先 pip install -r requirements-dev.txt（%s）' % (module, exc))
+    hidden = ['glass', 'webview', 'psutil', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont',
+              'keystone', 'capstone']
     if sys.platform == 'linux':
         hidden += ['webview.platforms.qt', 'qtpy', 'PySide6.QtWebEngineCore',
                    'PySide6.QtWebEngineWidgets', 'PySide6.QtWebChannel', 'PySide6.QtNetwork']
-    spec_text='a = Analysis('+repr([str(ROOT/'desktop/app.py')])+', pathex='+repr([str(ROOT/'desktop')])+', binaries=[], datas='+repr(datas)+', hiddenimports='+repr(hidden)+', excludes=[])\npyz = PYZ(a.pure)\n'
+    spec_text='a = Analysis('+repr([str(ROOT/'desktop/app.py')])+', pathex='+repr([str(ROOT/'desktop')])+', binaries='+repr(binaries)+', datas='+repr(datas)+', hiddenimports='+repr(hidden)+', excludes=[])\npyz = PYZ(a.pure)\n'
     if sys.platform=='win32':
         spec_text+="exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name='Neos75-Fullscreen', icon="+repr(str(ROOT/'desktop/ui/icon.ico'))+", debug=False, strip=False, upx=False, console=False)\n"
     elif sys.platform == 'darwin':

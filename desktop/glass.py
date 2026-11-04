@@ -561,9 +561,14 @@ class Api:
             result = self._core.generate(baseline, target, force=force)
             self._line(json.dumps(result, ensure_ascii=False))
             if result.get('adapted'):
-                self._event(title='已按锚点自动适配', message='这份固件的布局和已知版本不一样，'
-                            '程序按内容锚点重新算出了每一处补丁的位置，进度条同样会被去掉。',
-                            progress=40, phase='prepare')
+                # 别在这里就承诺「进度条会被去掉」——去进度条的那一层在链中间，
+                # 适配器可能只套上了后面的注入层。等它把话说明白再讲。
+                removed = result.get('progressRemoved')
+                message = ('这份固件的布局和已知版本不一样，程序按内容锚点重新算出了每一处补丁的位置。'
+                           if removed is not False else
+                           '这份固件的布局和已知版本不一样，程序按内容锚点重新算出了补丁位置，'
+                           '但没能套上「去掉上传进度条」那一层：浏览器上传时进度条会保留。')
+                self._event(title='已按锚点自动适配', message=message, progress=40, phase='prepare')
             # 强制模式的真实下限：一层补丁的旧字节都对不上时，只能盲套最基础的一层，
             # 而「去掉上传进度条」那几条补丁在更后面的一层里。既然用户已经勾了强制，
             # 就继续刷，但必须先把这件事说明白，不能让刷完才发现进度条还在。
@@ -579,7 +584,9 @@ class Api:
             self._core.maintain('flash', baseline, target, yes=True, force=force, on_line=self._line)
             self._event(title='正在重新连接', message='写入校验通过，正在返回键盘界面。', progress=95, phase='reconnect')
             self._core.node_run('tools/leave_mcu.js', on_line=self._line)
-            finished = '全屏补丁已完成' if not result.get('forceBlind') else '补丁已完成（进度条仍在）'
+            # 三种情况都要如实：强制盲套、适配时漏了去进度条那一层、以及全都到位。
+            kept = bool(result.get('forceBlind')) or result.get('progressRemoved') is False
+            finished = '补丁已完成（进度条仍在）' if kept else '全屏补丁已完成'
             self._event(title=finished, message='现在可以在官方程序导入全屏图片和 GIF。', phase='done', progress=100)
         return self._job('patch', work)
 

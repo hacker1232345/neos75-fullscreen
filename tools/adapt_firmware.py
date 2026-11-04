@@ -770,6 +770,11 @@ def build_adapted(source, name='<firmware>'):
         raise ValueError('套完之后尾部的现场数据被改动了，拒绝产出')
     return dfu_wrap(cur, applied[-1]), rep, chain, {
         'appliedProfiles': [d['derived_from'] for d in applied],
+        # 上层要靠这两个键给用户看人话：只回退到 profile 名，界面就会显示
+        # 「widget-dce6dce7（自动适配）」，普通人读不出这是干什么的。
+        'appliedLabels': [d.get('label') or d['derived_from'] for d in applied],
+        'label': applied[-1].get('label') or applied[-1]['derived_from'],
+        'validation': 'content-anchored',
         'changed_bytes': sum(d['changed_bytes'] for d in applied),
         'layers': applied}
 
