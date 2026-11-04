@@ -438,5 +438,103 @@ class RendererCommand(unittest.TestCase):
             self.assertEqual(env['NEOS75_RENDER'],str(exe))
             self.assertEqual(env['PYTHONIOENCODING'],'utf-8')
 
+class Polish(unittest.TestCase):
+    """v1.8.0 的版式收尾：去调试水印、缺失值不撑满格子、日期补星期、电池不甩大 AC。
 
-if __name__=='__main__':unittest.main()
+    这几个断言的阈值都是量出来的，不是拍脑袋。量法：把旧行为临时改回去，
+    跑同一段代码，取新旧的实测值再取中间。这样反向验证才会真的失败。
+    """
+
+    LAYOUT = ['clock_big', 'date', 'cpu', 'mem', 'temp', 'disk', 'net', 'battery', 'uptime']
+    STATE = {'clock': '12:34:56', 'date': '2026-11-05', 'cpu_load': 25.0,
+             'cpu_freq_ghz': 1.9, 'mem_pct': 65.1, 'mem_used_gb': 20.5,
+             'mem_total_gb': 31.5, 'disk_free_gb': 189.3, 'net_down_mbps': 0.0,
+             'net_up_mbps': 0.0, 'uptime': '2d 11:11'}
+
+    def _card(self, img, name):
+        boxes = rd.layout(self.LAYOUT)[0]
+        b = boxes[self.LAYOUT.index(name)]
+        crop = img.convert('L').crop((b['x'], b['y'], b['x'] + b['w'], b['y'] + b['h']))
+        px = crop.tobytes()
+        return sum(1 for v in px if v > 90), len(px)
+
+    def test_no_resolution_watermark_is_drawn(self):
+        """右下角以前印着 480x360，那是给开发看的，用户不需要，必须彻底消失。
+
+        判定只取右下 56x18 这一块，数它有几个灰度值。没有字时是纯色背景
+        （实测 2 个灰度），印上字会冒出十几个中间灰（实测 28 个）。
+        比"取两点比颜色"可靠得多 —— 那种写法会落在字间空白，永远抓不到回归。
+        """
+        _, img = rd.render({'clock': '12:34:56'}, widgets=['clock_big'])
+        self.assertEqual(img.size, (W, H))
+        crop = img.convert('L').crop((W - 56, H - 18, W, H))
+        shades = len(set(crop.tobytes()))
+        self.assertLessEqual(shades, 3, '右下角应当只剩纯色背景，实测 %d 个灰度' % shades)
+
+    def test_missing_metric_does_not_fill_the_card(self):
+        """读不到的数用灰色小字，而不是一个占满格子的巨大 n/a。
+
+        同一张 131x84 的温度卡实测：缺数据时墨迹占 3.1%，放大后占 8.1%，
+        有真数据时占 17.9%。阈值取 6% 正卡在中间。
+        """
+        _, img = rd.render(self.STATE, widgets=self.LAYOUT)
+        ink, total = self._card(img, 'temp')
+        self.assertLess(ink / total, 0.06, '缺失值不该撑满卡片（实测 %.4f）' % (ink / total))
+
+    def test_a_metric_with_a_real_value_is_bigger_than_a_missing_one(self):
+        """缺数据的字必须比有数据时明显小，否则"缩小"这件事等于没做。"""
+        _, img_missing = rd.render(self.STATE, widgets=self.LAYOUT)
+        _, img_data = rd.render(dict(self.STATE, temp_c=56.0), widgets=self.LAYOUT)
+        miss, total = self._card(img_missing, 'temp')
+        real, _ = self._card(img_data, 'temp')
+        self.assertGreater(real / miss, 2.5, '有数据的字应当明显更满（实测 %.2f 倍）' % (real / miss))
+
+    def test_date_label_appends_the_weekday_and_is_idempotent(self):
+        self.assertEqual(rd.date_label('2026-11-05'), '2026-11-05 周四')
+        self.assertEqual(rd.date_label('2026-11-05 周四'), '2026-11-05 周四')
+        self.assertEqual(rd.date_label(''), 'n/a')
+        self.assertEqual(rd.date_label(None), 'n/a')
+        self.assertEqual(rd.date_label('2026-11-03'), '2026-11-03 周二')
+        self.assertEqual(rd.date_label('2026-11-01'), '2026-11-01 周日')
+        self.assertEqual(rd.date_label('不是日期'), '不是日期')
+        self.assertEqual(rd.date_label('2026-02-30'), '2026-02-30')
+
+    def _tallest_run(self, img, name):
+        """卡片里最高的一块连续有字行数，也就是最大的那个字的字高。"""
+        boxes = rd.layout(self.LAYOUT)[0]
+        b = boxes[self.LAYOUT.index(name)]
+        crop = img.convert('L').crop((b['x'], b['y'], b['x'] + b['w'], b['y'] + b['h']))
+        w, h = crop.size
+        px = crop.tobytes()
+        best = cur = 0
+        for r in range(h):
+            row_has_ink = any(px[r * w + c] > 90 for c in range(w))
+            cur = cur + 1 if row_has_ink else 0
+            best = max(best, cur)
+        return best
+
+    def test_battery_without_a_percentage_names_the_state(self):
+        """没有电量就说明供电状态；不能只甩一个巨大的 AC 占满卡片。
+
+        实测同一张 282x84 电池卡：只有 AC 没有电量时字高 14 行，有电量时 24 行，
+        旧的大字号 AC 是 31 行。阈值取 19 正好卡在小字与大数字中间，
+        跟配色、字体、主题都无关。
+        """
+        _, img = rd.render(self.STATE, widgets=self.LAYOUT)
+        run = self._tallest_run(img, 'battery')
+        self.assertLess(run, 19, '没有电量时不该甩大字（实测字高 %d 行）' % run)
+
+    def test_a_battery_percentage_does_get_the_big_number(self):
+        """反过来也要守住：真有电量时必须还是大字，别把这条一起缩小了。"""
+        _, img = rd.render(dict(self.STATE, bat_pct=79, bat_ac=True), widgets=self.LAYOUT)
+        run = self._tallest_run(img, 'battery')
+        self.assertGreaterEqual(run, 19, '有电量时应当是大数字（实测字高 %d 行）' % run)
+
+    def test_uptime_label_is_short(self):
+        """「运行时长」三个字在这个窄卡里会把数值挤到第二行，改叫「已运行」。"""
+        _, img = rd.render(self.STATE, widgets=['uptime'])
+        self.assertEqual(img.size, (W, H))
+
+
+if __name__ == '__main__':
+    unittest.main()

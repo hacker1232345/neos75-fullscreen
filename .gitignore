@@ -21,3 +21,4 @@ __pycache__/
 /build-gui-smoke.json
 /wtest.json
 /*.report.json
+/theme_sheet.png

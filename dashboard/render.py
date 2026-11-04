@@ -19,6 +19,7 @@
   python dashboard/render.py --list
 """
 import argparse
+import datetime as dt
 import io
 import json
 import sys
@@ -385,6 +386,12 @@ def _metric(d, b, label, value, unit, color, sub=None, pct=None, fill=None):
         if sub:
             sub = sub + " " + unit
         unit, uw, room = "", 0, cw
+    # 读不到的数（n/a）不配占满整个格子：用两档小的字号，换成中性灰。
+    # 一个巨大的「n/a」比直接不显示还难看，而且会让人以为屏幕坏了。
+    missing = str(value) in ("n/a", "-", "")
+    if missing and not unit:
+        vs = max(11, int(vs * 0.52))
+        color = NA
     vtxt, vs = fitw(value, room, vs, "bd", 9)
     ymid = cy + max(9, inner) * 0.5
     put(d, (cx, ymid), vtxt, vs, "bd", color, anchor="lm")
@@ -545,11 +552,34 @@ def draw_clock_big(d, b, st, ctx):
     put(d, (cx + cw / 2, cy + ch / 2), vtxt, vs, "bd", ACCENT, anchor="mm")
 
 
+WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+
+
+def date_label(raw):
+    """把 2026-11-05 补成 2026-11-05 周四。已经带星期的原样返回。
+
+    采样器与桌面程序各自给出日期串，两者格式都是 ISO；星期只有一处能算准，
+    所以放在绘制这一层，谁传进来都一样。
+    """
+    s = str(raw or "").strip()
+    if not s or s == "n/a":
+        return "n/a"
+    if "周" in s or "星期" in s:
+        return s
+    try:
+        y, m, day = (int(x) for x in s.split("-")[:3])
+        return "%s %s" % (s, WEEKDAYS[dt.date(y, m, day).weekday()])
+    except (ValueError, TypeError):
+        return s
+
+
 def draw_date(d, b, st, ctx):
     cx, cy, cw, ch = _frame(d, b, "日期")
+    label = date_label(st.get("date"))
     vs = max(10, min(30, int(ch * 0.86)))
-    vtxt, vs = fitw(txt(st.get("date")), cw, vs, "mono", 10)
-    put(d, (cx + cw / 2, cy + ch / 2), vtxt, vs, "mono", TXT, anchor="mm")
+    vtxt, vs = fitw(label, cw, vs, "mono", 10)
+    # 日期跟着星期变长，居中会显得偏；左对齐配卡片留白更稳。
+    put(d, (cx, cy + ch / 2), vtxt, vs, "mono", TXT, anchor="lm")
 
 
 def draw_cpu(d, b, st, ctx):
@@ -596,9 +626,13 @@ def draw_net(d, b, st, ctx):
 def draw_battery(d, b, st, ctx):
     p = st.get("bat_pct")
     if p is None:
+        # 拿不到电量（台式机或电池驱动没暴露）时，不要用一个巨大的 AC 占满卡片。
+        # 说明「在供电」就够了，字小一点，把视觉重量让给真正有数的部件。
         cx, cy, cw, ch = _frame(d, b, "电池")
-        vs = max(12, min(34, int(ch * 0.80)))
-        put(d, (cx + cw / 2, cy + ch / 2), "AC", vs, "bd", NA, anchor="mm")
+        tag = "交流供电" if st.get("bat_ac") else "未检测到电池"
+        vs = max(10, min(15, int(ch * 0.30)))
+        vtxt, vs = fitw(tag, cw, vs, "bd", 10)
+        put(d, (cx, cy + ch / 2), vtxt, vs, "bd", NA, anchor="lm")
         return
     c = GOOD if p > 30 else (WARN if p > 15 else BAD)
     tag = "充电中" if st.get("bat_charging") else ("交流供电" if st.get("bat_ac") else "放电中")
@@ -606,10 +640,10 @@ def draw_battery(d, b, st, ctx):
 
 
 def draw_uptime(d, b, st, ctx):
-    cx, cy, cw, ch = _frame(d, b, "运行时长")
+    cx, cy, cw, ch = _frame(d, b, "已运行")
     vs = max(10, min(26, int(ch * 0.84)))
     vtxt, vs = fitw(txt(st.get("uptime")), cw, vs, "mono", 10)
-    put(d, (cx + cw / 2, cy + ch / 2), vtxt, vs, "mono", TXT, anchor="mm")
+    put(d, (cx, cy + ch / 2), vtxt, vs, "mono", TXT, anchor="lm")
 
 
 def draw_volume(d, b, st, ctx):
@@ -785,7 +819,8 @@ def render(st, widgets=None, preset="default", quality=72, limit=None, history=N
     d = ImageDraw.Draw(img)
     # 顶部一条极细的强调线，避免整体过暗
     d.rectangle([0, 0, W, 2], fill=TOPLINE)
-    d.text((W - 8, H - 4), "480x360", font=F(10, "mono"), fill=WATERMARK, anchor="rs")
+    # 右下角原本印着分辨率，那是开发时确认画布用的，用户看不懂也不需要，
+    # 还会在浅色主题上显得脏。删掉。
 
     ctx = {"history": history or [], "info": info}
     for b in boxes:
