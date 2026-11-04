@@ -46,6 +46,10 @@ CTX_WORD = 0x2000c610     # start of a 2547 B hole between static references
 MILLIS = 0x20003a54
 TIMEOUT = 15000
 CMD_TABLE = 0x35316
+CMD_TBB = 0x352fa          # `tbb [pc,r]` 那条指令；命令表项偏移是在它的地址上算的
+CMD_RET = 0x356e8          # 命令处理完跳回去继续跑的位置
+CMD_TABLE_REF = 0x35316    # 参考镜像里的原值，用于换算相对位移
+CMD_TBB_REF = 0x352fa
 
 MAGIC = 0x5747314e        # 'NWG1'
 ALLOC = 0x2637c
@@ -321,11 +325,12 @@ rx_done:
     add sp, #16
     pop {{r4-r7, lr}}
     strb.w r0, [sp, #0x22]
-    b.w #0x356e8
+    b.w #{CMD_RET}
 '''
 
 
-TICK = f'''
+def _tick():
+    return f'''
     push {{r4-r7, lr}}
     sub sp, #56
     {imm('r0', CTX_WORD)}
@@ -482,7 +487,8 @@ tk_done:
 '''
 
 
-ENSURE = f'''
+def _ensure():
+    return f'''
     push {{r4-r7, lr}}
     sub sp, #4
     mov r4, r0
@@ -568,12 +574,61 @@ def page_mask(pages):
     return mask
 
 
+def visible_symbols():
+    """当前生效的厂商地址：默认是参考镜像里的值，可被 relocate() 改写。"""
+    names = ('MEMCPY LBL_CREATE LBL_TEXT ALLOC SET_POS SET_SIZE SET_COLOR '
+             'SET_FONT GETSCREEN TIMER FONT CMD_RET').split()
+    return {n: globals()[n] for n in names}
+
+
+def relocate(syms=None, free=None):
+    """换一套厂商地址（和可选的空闲带起点），返回原来那套，便于还原。"""
+    old = visible_symbols()
+    old['FREE'] = globals()['FREE']          # 无论改不改，都要记下来给 restore 用
+    old['TBB'] = globals()['CMD_TBB']
+    old['CMD_TABLE'] = globals()['CMD_TABLE']
+    if syms:
+        for k, v in syms.items():
+            if k == 'FREE':
+                continue
+            if k == 'TBB':
+                globals()['CMD_TBB'] = v
+                globals()['CMD_TABLE'] = v + (CMD_TABLE_REF - CMD_TBB_REF)
+                continue
+            if k not in old:
+                raise ValueError(f'未知符号 {k}')
+            if not isinstance(v, int) or v & 1:
+                raise ValueError(f'{k} 地址必须是偶数整数，收到 {v!r}')
+            globals()[k] = v
+    if free is not None:
+        globals()['FREE'] = free
+    return old
+
+
+def restore(old):
+    """把 relocate() 返回的旧值装回去（含由 FREE 派生的四个段起点）。"""
+    for k, v in old.items():
+        if k in ('FREE', 'TBB'):
+            continue
+        globals()[k] = v
+    base = old.get('FREE')
+    if base is not None:
+        globals()['FREE'] = base
+        globals()['F_RECEIVE'] = base
+        globals()['F_TICK'] = base + 0x500
+        globals()['F_ENSURE'] = base + 0x700
+        globals()['F_DATA'] = base + 0x900
+    if old.get('TBB') is not None:
+        globals()['CMD_TBB'] = old['TBB']
+        globals()['CMD_TABLE'] = old['CMD_TABLE']
+
+
 def build_code(pages):
     mask = page_mask(pages)
     chunks = [
         ('receive', receive_text(), F_RECEIVE, F_TICK),
-        ('tick', TICK, F_TICK, F_ENSURE),
-        ('ensure', ENSURE, F_ENSURE, F_DATA),
+        ('tick', _tick(), F_TICK, F_ENSURE),
+        ('ensure', _ensure(), F_ENSURE, F_DATA),
     ]
     out = b''
     layout = {}
@@ -591,11 +646,18 @@ def build_code(pages):
     return out, layout
 
 
-def patch(source, pages):
+def patch(source, pages, strict=True):
+    """把覆盖层打进一份 491520 字节的 payload。
+
+    strict=True：只接受参考镜像（原来的行为，给已验证的 profile 用）。
+    strict=False：允许任意镜像 —— 前提是调用方已经用 `relocate()` 把厂商函数地址、
+                  命令表项、空闲带起点都换成了这份固件上的真值。此时只保留
+                  「空闲带必须全 0xFF」「命令项必须还是 0x01f5」这两条物理前提。
+    """
     if len(source) != LENGTH:
         raise ValueError('需要完整 491520 字节 payload')
     sha = hashlib.sha256(source[:CODE_LENGTH]).hexdigest()
-    if sha != REF_SHA:
+    if strict and sha != REF_SHA:
         raise ValueError(f'仅支持 reference 代码哈希，收到 {sha}')
     if set(source[FREE - BASE:0x7f000 - BASE]) != {0xff}:
         raise ValueError('空闲区不再全为 0xFF，拒绝写入')
@@ -605,7 +667,7 @@ def patch(source, pages):
     code, layout = build_code(pages)
     result = bytearray(source)
     result[FREE - BASE:FREE - BASE + len(code)] = code
-    result[CMD_TABLE - BASE:CMD_TABLE - BASE + 2] = struct.pack('<H', (F_RECEIVE - 0x352fe) // 2)
+    result[CMD_TABLE - BASE:CMD_TABLE - BASE + 2] = struct.pack('<H', (F_RECEIVE - (CMD_TBB + 4)) // 2)
 
     payload = bytes(result)
     diff = [i for i in range(LENGTH) if payload[i] != source[i]]

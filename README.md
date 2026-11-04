@@ -109,6 +109,8 @@ node   dashboard/push.js loop  --preset default --interval 3000
 - `dashboard/`：屏幕部件模块（采样、渲染、推送、离线自测）；`dashboard/native_rows.py` 把采样状态折成四行 ASCII。
 - `tools/native_widget.js`、`tools/push_widget.js`：原生文字通道（协议编解码、命令行、常驻 loop）。
 - `tools/build_widget.py`：覆盖组件固件的构建器；纯标准库，自带 THUMB-2 长跳编码器。
+- `tools/symbols.py`、`tools/make_anchor.py`、`tools/adapt_firmware.py`、`tools/adapt_issue.py`：陌生固件的自动适配（符号签名、内容锚点、链式定位、issue 入口）。
+- `firmware/anchors/`：每层补丁的内容锚点与厂商函数签名，由上面两个脚本生成。
 - `examples/`：480×360边框图和两帧GIF。
 - `evidence/`、`docs/`：实机回验、仿真结果、验收及纠错复盘。
 
@@ -130,6 +132,21 @@ c69c38b02841c533db44e8b058a6b86d4a0e816d2bb6ce95cd2b1d5d6927016d
 ```
 
 备份长度491520字节，映射0x8000..0x80000。程序严格核对前487424字节代码区域SHA256与全部补丁原字节，末尾4096字节现场数据保持原样。整片哈希因现场数据不同可能变化。其他代码构建必须重新定位，不能仅凭型号相同套用。
+
+## 别人家的固件自动适配
+
+上面的表只认已经验证过的两种构建。同款键盘出厂版本五花八门，遇到没见过的固件时，用适配器按**内容锚点**定位补丁点——不记「打在 0x2c53c 这一格」，改记「打在**这段字节**所在的那一格」，布局整体迁移也找得回来：
+
+```sh
+python tools/adapt_firmware.py --firmware backup.bin              # 只看结论
+python tools/adapt_firmware.py --firmware backup.bin --build out.bin   # 直接出可刷镜像
+python tools/adapt_firmware.py --firmware backup.bin --emit out/      # 写派生 profile
+python tools/adapt_firmware.py --selftest                          # 离线自检
+```
+
+命令行之外还有个不用装任何东西的路子：在 issue 里把备份拖进去、打 `firmware-adapt` 标签，`.github/workflows/adapt.yml` 会自动算完并回帖给出镜像下载。整条链路不接设备、不刷写，只算字节。
+
+注入层（覆盖组件那段新代码）不能按字节搬——里面含厂商函数的绝对地址，换固件必须按 16 字节入口签名重新找出那 11 个函数再重新汇编；签名对不上就只跳过这一层，前两层照打，不硬来。原理、铁律和风险清单见 [docs/adapt-any-firmware.md](docs/adapt-any-firmware.md)。
 
 ## 安装与离线验证
 

@@ -1,0 +1,94 @@
+name: Adapt firmware from an issue
+
+# 用户在同款键盘上导出固件备份、拖进 issue，这里自动算出能刷的镜像并回帖。
+# 全程不碰设备、不需要 USB、不刷写 —— 只在内存里算字节，产物挂进 issue 由用户
+# 自己下载、自己校验、自己决定刷不刷。
+
+on:
+  issues:
+    types: [opened, edited, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: '要处理的 issue 编号'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: adapt-${{ github.event.issue.number || inputs.issue }}
+  cancel-in-progress: true
+
+jobs:
+  adapt:
+    # 只处理带 firmware-adapt 标签的 issue：避免有人随手开个 bug 单就被灌一堆机器人输出
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.issue.labels.*.name, 'firmware-adapt')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      issues: write
+    env:
+      ISSUE: ${{ github.event.issue.number || inputs.issue }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Pick the attachment link out of the issue body
+        id: body
+        env:
+          BODY: ${{ github.event.issue.body }}
+        run: |
+          python -c "import os,sys; sys.path.insert(0,'tools'); from adapt_issue import find_url; print('url=' + (find_url(os.environ.get('BODY') or '') or ''))" >> "$GITHUB_OUTPUT"
+      - name: Adapt
+        if: steps.body.outputs.url != ''
+        continue-on-error: true
+        run: |
+          python tools/adapt_issue.py --url "${{ steps.body.outputs.url }}" --out ci
+      - name: Report back
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const n = Number(process.env.ISSUE);
+            const marker = '<!-- neos75-adapt -->';
+            let files = [];
+            let body;
+            try {
+              files = fs.readdirSync('ci').filter(f => /\.(bin|json)$/.test(f) && f !== 'input.bin');
+            } catch {}
+            try {
+              body = fs.readFileSync('ci/summary.md', 'utf8');
+            } catch {
+              body = '这次没算出来：issue 正文里没找到固件附件的链接，或者附件不是键盘备份。\n\n' +
+                     '请把备份文件（`.bin`，491520 或 491536 字节）**直接拖进这条 issue**，' +
+                     '再把 `firmware-adapt` 标签去掉重加一次。';
+            }
+            if (files.length) {
+              body += '\n\n产物在本工作流的 Artifacts 里：' + files.map(f => '`' + f + '`').join('、');
+            }
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: n, per_page: 100,
+            });
+            const old = comments.find(c => c.body && c.body.includes(marker));
+            const text = marker + '\n' + body;
+            if (old) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo, comment_id: old.id, body: text,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: n, body: text,
+              });
+            }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: adapted-${{ github.event.issue.number || inputs.issue }}
+          path: ci/*
+          if-no-files-found: ignore

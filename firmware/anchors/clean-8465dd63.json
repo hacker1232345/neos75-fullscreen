@@ -1,0 +1,41 @@
+{
+ "profile": "clean-8465dd63",
+ "label": "全屏+清爽增强",
+ "image_sha256": "d01bf64752e80ef8f5878acd6207d6d7277d4a850c551856eed0301daa6aed57",
+ "source_code_sha256": "cdd6334d2917b2e08d86c7c44ac45706d6b8081bb0707a349b6c7b7e9749beab",
+ "image_code_sha256": "cdd6334d2917b2e08d86c7c44ac45706d6b8081bb0707a349b6c7b7e9749beab",
+ "anchors": [
+  {
+   "offset": "0x2c53c",
+   "before": "f2f72cf9",
+   "anchor": "fdd4f8dc000121",
+   "anchor_delta": -7
+  },
+  {
+   "offset": "0x2c5aa",
+   "before": "09f06bff",
+   "anchor": "a9686a",
+   "anchor_delta": 4
+  },
+  {
+   "offset": "0x2c5cf",
+   "before": "f6b831",
+   "anchor": "e7fd40",
+   "anchor_delta": -3
+  },
+  {
+   "offset": "0x3654a",
+   "before": "ff",
+   "anchor": "16fa2068",
+   "anchor_delta": -4
+  },
+  {
+   "offset": "0x3669c",
+   "before": "30",
+   "anchor": "250a00",
+   "anchor_delta": 1
+  }
+ ],
+ "anchored": 5,
+ "total": 5
+}

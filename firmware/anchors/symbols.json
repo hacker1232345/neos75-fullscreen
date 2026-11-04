@@ -1,0 +1,58 @@
+{
+  "note": "来自 orig_synth.bin",
+  "signature_bytes": 16,
+  "functions": {
+    "MEMCPY": {
+      "address": 33764,
+      "signature_hex": "10b5431a934209d28318881803e010f8"
+    },
+    "LBL_CREATE": {
+      "address": 152624,
+      "signature_hex": "10b5014645f2c460c0f2040001f09cfb"
+    },
+    "LBL_TEXT": {
+      "address": 156252,
+      "signature_hex": "70b50d46044603f079f9002d08bf256a"
+    },
+    "ALLOC": {
+      "address": 156540,
+      "signature_hex": "10b5e0b104464ff2a000c8f21e000068"
+    },
+    "SET_POS": {
+      "address": 173800,
+      "signature_hex": "b0b51446054600f05ffa2846214600f0"
+    },
+    "SET_SIZE": {
+      "address": 173936,
+      "signature_hex": "b0b51446054600f001fa28462146fff7"
+    },
+    "SET_COLOR": {
+      "address": 174844,
+      "signature_hex": "80b513468ab25521fff7dcfd80bd0000"
+    },
+    "SET_FONT": {
+      "address": 174860,
+      "signature_hex": "80b513460a465721fff7d4fd80bd0000"
+    },
+    "GETSCREEN": {
+      "address": 176404,
+      "signature_hex": "80b5f5f78bfbf5f7ddfb80bd80b5f5f7"
+    },
+    "TIMER": {
+      "address": 181620,
+      "signature_hex": "f0b581b0064644f20040c2f200001446"
+    },
+    "FONT": {
+      "address": 284212,
+      "signature_hex": "91be000045be00001400010000000000"
+    },
+    "TBB": {
+      "address": 217850,
+      "signature_hex": "dfe812f011003200f5018300a400f501"
+    },
+    "CMD_RET": {
+      "address": 218856,
+      "signature_hex": "b8f1000f06d099f800000df122010222"
+    }
+  }
+}

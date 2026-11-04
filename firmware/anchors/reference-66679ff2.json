@@ -1,0 +1,131 @@
+{
+ "profile": "reference-66679ff2",
+ "label": "原验证构建",
+ "image_sha256": "dba2a977ed2a81315efa030631ae63741fe694234ad8fcf6dd9e0254bf3f41f7",
+ "source_code_sha256": "66679ff2cb06ab5a5e47673f679e14e68bf2082fb6401b3808ca58d7f2e1a40c",
+ "image_code_sha256": "66679ff2cb06ab5a5e47673f679e14e68bf2082fb6401b3808ca58d7f2e1a40c",
+ "anchors": [
+  {
+   "offset": "0x2f728",
+   "before": "0221",
+   "anchor": "c4f8d4",
+   "anchor_delta": 2
+  },
+  {
+   "offset": "0x2f780",
+   "before": "8c21",
+   "anchor": "eff72afb",
+   "anchor_delta": -4
+  },
+  {
+   "offset": "0x2f782",
+   "before": "1422",
+   "anchor": "c4f8d8",
+   "anchor_delta": 2
+  },
+  {
+   "offset": "0x2f790",
+   "before": "4ff4a071",
+   "anchor": "aeffd4f8d800",
+   "anchor_delta": -6
+  },
+  {
+   "offset": "0x2f794",
+   "before": "4ff4a072",
+   "anchor": "f2f7eaff",
+   "anchor_delta": 4
+  },
+  {
+   "offset": "0x2f848",
+   "before": "4ff4a071",
+   "anchor": "52ffd4f8dc00",
+   "anchor_delta": -6
+  },
+  {
+   "offset": "0x2f84c",
+   "before": "4ff4a072",
+   "anchor": "f2f78eff",
+   "anchor_delta": 4
+  },
+  {
+   "offset": "0x9928",
+   "before": "42f20800",
+   "anchor": "49b9",
+   "anchor_delta": -2
+  },
+  {
+   "offset": "0x992c",
+   "before": "c0f20300",
+   "anchor": "14f024",
+   "anchor_delta": 4
+  },
+  {
+   "offset": "0x9a38",
+   "before": "42f20800",
+   "anchor": "f088fb",
+   "anchor_delta": -3
+  },
+  {
+   "offset": "0x9a40",
+   "before": "c0f20300",
+   "anchor": "993b68",
+   "anchor_delta": -3
+  },
+  {
+   "offset": "0x2b912",
+   "before": "42f2080a",
+   "anchor": "21462a46c0",
+   "anchor_delta": 4
+  },
+  {
+   "offset": "0x2b91a",
+   "before": "c0f2030a",
+   "anchor": "f9f713fc",
+   "anchor_delta": 4
+  },
+  {
+   "offset": "0x2b9ce",
+   "before": "42f20805",
+   "anchor": "0168c0",
+   "anchor_delta": 4
+  },
+  {
+   "offset": "0x2b9d4",
+   "before": "c0f20305",
+   "anchor": "12a02a",
+   "anchor_delta": 4
+  },
+  {
+   "offset": "0x9996",
+   "before": "49f20406",
+   "anchor": "02fb01f3",
+   "anchor_delta": 4
+  },
+  {
+   "offset": "0x999e",
+   "before": "c0f20106",
+   "anchor": "b3422b",
+   "anchor_delta": 4
+  },
+  {
+   "offset": "0x2b9b4",
+   "before": "49f20402",
+   "anchor": "03fb02f0",
+   "anchor_delta": -4
+  },
+  {
+   "offset": "0x2b9b8",
+   "before": "c0f20102",
+   "anchor": "dd0890",
+   "anchor_delta": 4
+  },
+  {
+   "offset": "0x3b1b9",
+   "before": "40014001",
+   "anchor": "97010001",
+   "anchor_delta": -4
+  }
+ ],
+ "anchored": 20,
+ "total": 20
+}

@@ -1,6 +1,6 @@
 {
   "name": "neos75-fullscreen",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "private": true,
   "description": "AULA Neos75 480x360 fullscreen image and GIF patch tools, plus optional on-screen status widgets",
   "license": "MIT",

@@ -1,5 +1,47 @@
 # 更新记录
 
+## v1.6.0 — 2026-11-04
+
+同款键盘的固件版本五花八门，以前每来一份都要人工反汇编找新偏移、单独做一份 profile。
+这一版把「按偏移打补丁」换成「按内容锚点定位」，陌生人把备份拖进 issue 就能拿到可刷镜像。
+
+- **内容锚点**（`tools/make_anchor.py` → `firmware/anchors/*.json`）：每条补丁记一段
+  **全片唯一**且**不盖住本层任何被改字节**的上下文。`reference` 20/20、`clean` 5/5、
+  `widget-none` 2/2 都有锚点；注入层的两条本来就锚不住（那段代码含绝对地址）。
+  - 踩过的最贵的坑：第一版是「在新固件上从旧偏移取上下文当指纹」，布局一迁移就取到
+    **错位**的字节，而那段错位字节恰好也唯一 → 算出「位移 0」，看起来成功、实际写到
+    完全不相关的位置。**锚点必须从这一层的源镜像预先算好落盘**，适配时只拿它去搜。
+  - 第二个坑：旧版锚点只避开「自己这条补丁」，会盖住同层其它补丁的字节，上层打完就
+    搜不到了，于是把「已打过」误判成「没打过」、整链 blocked。现在按 `forbidden`
+    区间躲开、并要求源镜像与目标镜像**两边都唯一**。
+- **符号签名**（`tools/symbols.py` → `firmware/anchors/symbols.json`）：11 个厂商函数
+  各取 16 字节入口当签名，加 `TBB`、`CMD_RET` 两个结构锚点，共 13 项。在 clean 与
+  原版两份镜像里都能唯一定位、偏移一致。
+  - 结论：**RAM 变量不需要签名**。它们是固定 `.bss` 地址，跨固件不变；需要重定位的
+    只有函数代码。（实测在 clean 镜像里搜这些地址的 `movw` 引用是 0 处 —— 那些引用
+    只存在于注入代码里。）
+- **可重定位构建器**（`tools/build_widget.py`）：`TICK`/`ENSURE` 从模块级 f-string 改成
+  函数（否则 import 时就把符号值冻死了）；新增 `relocate(syms, free)` / `restore(old)` /
+  `visible_symbols()`；`patch(source, pages, strict=True)` 加 `strict=False`（只在符号
+  已换好时用）。命令项写入改成 `(F_RECEIVE - (CMD_TBB + 4)) // 2` —— **必须 +4**，
+  `tbb [pc,r]` 用 pc+4 作表基址。往返验证：迁移 +0x400 再 `restore()`，与基线逐字节一致。
+- **链式适配器**（`tools/adapt_firmware.py`）：`build_adapted(source)` 一条命令出完整
+  镜像（含 DFU 后缀与 CRC 反码）。每条补丁三种结局：原位命中 / 按锚点搬移 / 拒绝
+  （`unlocatable`、`mismatch`、`injection`）。`--build` 退出码有意义：`0` 成功、`3` 点
+  对不上、`4` 已经是最新。
+  - 实测五种输入：原版迁移 → 套三层 2409 字节；clean 原位 → 只套 widget 2369 字节
+    （产物 sha 与仓库里 `ov6q.bin` 的 `target_sha256` **完全一致**）；全屏原位 → 套两层；
+    设备当前 `ov6p` → 走「只换页掩码」路径，366 字节，代码指纹落到 `ec412e092dc8`。
+  - 两条独立路线（直接 `build_widget.patch` vs 适配器的 `apply_entries`）在三份迁移镜像
+    × 两种页掩码下产物**逐字节相同**。
+- **issue 入口**（`tools/adapt_issue.py` + `.github/workflows/adapt.yml` +
+  `.github/ISSUE_TEMPLATE/firmware-adapt.md`）：把 `.bin` 拖进 issue、打 `firmware-adapt`
+  标签，机器人算完回帖给出镜像与派生 profile。全程不接设备、不刷写，只算字节。
+  - 护栏：长度必须是 491520/491536、代码区不能一半以上是 `0xFF`；抓不到附件只回
+    「重新拖一次」，不抛栈给普通用户看。
+- 测试：新增 `tests/test_adapt.py`（18 项：锚点文件完整性、签名覆盖、定位唯一性、
+  三种结局、issue 输入护栏、真机镜像端到端）。全量 **121 项 Python + 8 组 node 全绿**。
+
 ## v1.5.1 — 2026-11-04
 
 两个实测反馈的修复。两个问题都不是「参数没调好」，而是**逻辑走错了分支**。
