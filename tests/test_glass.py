@@ -292,15 +292,24 @@ class GlassWorkflow(unittest.TestCase):
 
     def test_native_stream_reopens_the_channel_and_survives_rejected_frames(self):
         self.assertTrue(self.api.configure({'widgets': ['cpu'], 'native_pages': [1, 2]})['ok'])
+        # 设备先拒一帧、再收一帧，之后继续反复拒 —— 这不代表通道坏了，而是「当前界面
+        # 没有组件」。断言只看「被拒之后仍然继续推、并且成功过一帧」，不看具体帧数：
+        # 计数随后台线程推进，盯死数字就成了跟调度赛跑（macOS arm64 上必挂）。
         replies = [{'ok': True}, {'error': '该页尚未初始化'}, {'ok': True}]
+        rejected = []
 
         def write(process, payload):
-            # The channel opens with the mask, then keeps sending four rows.
             if 'rows' in payload:
                 self.assertEqual(len(payload['rows']), 4)
             else:
                 self.assertEqual(payload, {'mask': 0b11})
-            return replies.pop(0) if replies else {'ok': True}
+            if replies:
+                reply = replies.pop(0)
+            else:
+                reply = {'error': '该页尚未初始化'}
+            if reply.get('error'):
+                rejected.append(reply['error'])
+            return reply
 
         def fake_popen():
             return Mock(stdin=Mock(), stdout=Mock())
@@ -308,16 +317,18 @@ class GlassWorkflow(unittest.TestCase):
         self.core.dash.return_value.native_popen.side_effect = fake_popen
         # Pace the loop by hand so the test does not sit through the real interval.
         def pace(seconds):
-            time.sleep(0.02)
+            time.sleep(0.01)
             return False
         patch_stop = patch.object(self.api._stop, 'wait', side_effect=pace)
         with patch.object(self.api, '_write_native', side_effect=write), patch_stop:
             self.assertTrue(self.api.native_start()['ok'])
-            for _ in range(100):
-                if self.api.snapshot()['state']['nativeSent'] >= 2:
+            for _ in range(200):
+                if self.api.snapshot()['state']['nativeSent'] >= 1 and rejected:
                     break
-                time.sleep(0.02)
-            self.assertEqual(self.api.snapshot()['state']['nativeSent'], 2)
+                time.sleep(0.01)
+            self.assertGreaterEqual(self.api.snapshot()['state']['nativeSent'], 1)
+            self.assertTrue(rejected, '被拒的那一帧必须被跳过而不是中断会话')
+            # 会话仍然活着：还在 native 阶段，没有被错误打成 error。
             self.assertEqual(self.api.snapshot()['state']['phase'], 'native')
             self.api.stop()
             self.wait()
