@@ -139,8 +139,8 @@ class ChainProfiles(unittest.TestCase):
 class CatalogConsistency(unittest.TestCase):
     def test_catalog_shape(self):
         profiles=b.manifests()
-        self.assertEqual(len(profiles),4)
-        self.assertEqual(len({m['profile'] for m in profiles}),4)
+        self.assertEqual(len(profiles),5)
+        self.assertEqual(len({m['profile'] for m in profiles}),5)
         for m in profiles:
             changes=set()
             for p in m['patches']:
@@ -157,12 +157,20 @@ class CatalogConsistency(unittest.TestCase):
     def test_chain_links_by_hash_not_by_parent_label(self):
         profiles={m['profile']:m for m in b.manifests()}
         ref,clean=profiles['reference-66679ff2'],profiles['clean-8465dd63']
-        # 链衔接靠哈希：clean 的 source 必须正好是 reference 的 target（因此只有 5 个唯一哈希）
+        widget=profiles['widget-dce6dce7']
+        widget_none=profiles['widget-none-ec412e09']
+        # 链衔接靠哈希：clean 的 source 必须正好是 reference 的 target
         self.assertEqual(clean['source_code_sha256'],ref['target_code_sha256'])
         self.assertEqual(clean['parent'],ref['profile'])
         self.assertNotEqual(clean['target_code_sha256'],ref['target_code_sha256'])
+        # 组件层接在 clean 之后，默认关闭层接在组件层之后
+        self.assertEqual(widget['source_code_sha256'],clean['target_code_sha256'])
+        self.assertEqual(widget['parent'],clean['profile'])
+        self.assertEqual(widget_none['source_code_sha256'],widget['target_code_sha256'])
+        self.assertEqual(widget_none['parent'],widget['profile'])
+        # 五个 profile 各有 source/target，共 10 个哈希，唯一值正好 7 个
         hashes=[m[k] for m in profiles.values() for k in ['source_code_sha256','target_code_sha256']]
-        self.assertEqual(len(set(hashes)),6)
+        self.assertEqual(len(set(hashes)),7)
         # clean 层不得与 reference 层改动同一个字节
         ref_bytes={off(p)+i for p in ref['patches'] for i in range(len(raw(p,'before')))}
         clean_bytes={off(p)+i for p in clean['patches'] for i in range(len(raw(p,'before')))}

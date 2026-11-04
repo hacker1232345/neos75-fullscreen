@@ -75,6 +75,7 @@ D_WAIT = 0
 D_BYE = 16
 D_EMPTY = 32
 D_MASK = 48           # page mask lives in the data block, rewritable at runtime
+D_NONE = 52           # empty string: clears a row when a page leaves the mask
 ROW_BYTES = 32        # one text row, per page
 
 
@@ -338,6 +339,17 @@ TICK = f'''
     ldrb r6, [r0]
     cmp r6, #5
     bhi tk_done
+    add.w r0, r4, #{C_LABELS}
+    lsls r1, r6, #4
+    add r0, r1
+    ldr r0, [r0]
+    cmp r0, #0
+    beq tk_done
+    movs r0, #1
+    lsls r0, r0, r6
+    ldr r1, [r4, #{C_MASK}]
+    tst r0, r1
+    beq tk_clear
     ldr r0, [r4, #{C_PAGE}]
     subs r0, r0, #1
     cmp r0, r6
@@ -381,7 +393,8 @@ tk_row:
     lsls r1, r6, #4
     add r0, r1
     ldr.w r0, [r0, r7, lsl #2]
-    cbz r0, tk_row_next
+    cmp r0, #0
+    beq tk_row_next
     mov r1, sp
     bl #{LBL_TEXT}
     movs r0, #16
@@ -395,6 +408,40 @@ tk_row_next:
     cmp r7, #4
     blo tk_row
     b tk_done
+tk_clear:
+    movs r0, #16
+    mul r0, r0, r6
+    add.w r1, r4, #{C_APPL}
+    add r1, r0
+    ldr r0, [r1]
+    adds r2, r0, #1
+    cmp r2, #0
+    beq tk_done
+    movs r7, #0
+tk_clear_row:
+    add.w r0, r4, #{C_LABELS}
+    lsls r1, r6, #4
+    add r0, r1
+    ldr.w r0, [r0, r7, lsl #2]
+    cmp r0, #0
+    beq tk_clear_next
+    {imm('r1', F_DATA + D_NONE)}
+    bl #{LBL_TEXT}
+tk_clear_next:
+    adds r7, #1
+    cmp r7, #4
+    blo tk_clear_row
+    mvn r0, #0
+    movs r1, #16
+    mul r1, r1, r6
+    {imm('r2', C_APPL)}
+    add r2, r4
+    add r2, r1
+    str r0, [r2]
+    str r0, [r2, #4]
+    str r0, [r2, #8]
+    str r0, [r2, #12]
+    b tk_done
 tk_stale:
     ldr.w r0, [r4, #{C_STALE}]
     cmp r0, #0
@@ -407,7 +454,8 @@ tk_stale_row:
     lsls r1, r6, #4
     add r0, r1
     ldr.w r0, [r0, r7, lsl #2]
-    cbz r0, tk_stale_next
+    cmp r0, #0
+    beq tk_stale_next
     {imm('r1', F_DATA + D_BYE)}
     cmp r7, #0
     bne tk_stale_set
@@ -582,14 +630,14 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--input', type=Path, required=True)
     ap.add_argument('--out', type=Path, required=True)
-    ap.add_argument('--pages', default='6')
+    ap.add_argument('--pages', default='none',
+                    help="默认 none：装上组件但一页都不开，用户自己在程序里选")
     args = ap.parse_args()
-    pages = sorted({int(x) for x in args.pages.split(',') if x.strip()})
+    text = args.pages.strip().lower()
+    pages = [] if text in ('', 'none', 'off', '0') else sorted({int(x) for x in text.split(',') if x.strip()})
     for p in pages:
         if p not in SLOT_OFF:
             raise SystemExit(f'页码必须在 1..6，收到 {p}')
-    if not pages:
-        raise SystemExit('至少要选一页')
     fw, rep = patch(args.input.read_bytes(), pages)
     args.out.write_bytes(fw)
     args.out.with_suffix('.json').write_text(

@@ -53,9 +53,12 @@ check('mask frame encodes the page mask', () => {
   assert.strictEqual(p[12], w.checksum([...p.subarray(2, 12)]));
 });
 
-check('mask frame rejects an empty or out-of-range mask', () => {
-  assert.throws(() => w.maskPacket(0), /mask must be/);
+check('mask frame accepts 0 (off) and rejects out-of-range masks', () => {
+  const off = w.maskPacket(0);
+  assert.deepStrictEqual([...off.subarray(9, 12)], [0x7f, 1, 0]);
   assert.throws(() => w.maskPacket(0x40), /mask must be/);
+  assert.throws(() => w.maskPacket(-1), /mask must be/);
+  assert.throws(() => w.maskPacket(1.5), /mask must be/);
 });
 
 check('page list and mask round-trip for every subset', () => {
@@ -64,10 +67,12 @@ check('page list and mask round-trip for every subset', () => {
   }
 });
 
-check('maskFromPages refuses an empty selection and bad page numbers', () => {
-  assert.throws(() => w.maskFromPages([]), /at least one page/);
+check('maskFromPages maps an empty selection to 0 and rejects bad page numbers', () => {
+  // 空选 = 0 = 六页全不显示，设备实测接受（0xFE）。
+  assert.strictEqual(w.maskFromPages([]), 0);
   assert.throws(() => w.maskFromPages([0]), /outside 1..6/);
   assert.throws(() => w.maskFromPages([7]), /outside 1..6/);
+  assert.throws(() => w.maskFromPages(['2']), /outside 1..6/);
 });
 
 check('acknowledgement parser accepts accepted and rejected statuses', () => {

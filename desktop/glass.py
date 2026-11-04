@@ -393,19 +393,28 @@ class Api:
         return self._job('native-probe', work)
 
     def native_pages(self):
-        """把「显示在哪些界面」写进键盘（写 RAM，不写 Flash）。"""
+        """把「显示在哪些界面」写进键盘（写 RAM，不写 Flash）。
+
+        一个界面都不选也是合法选择：掩码 0 会把文字组件彻底关掉，原厂页面恢复干净。
+        """
         mask = self._native_mask()
         pages = self._config.get('native_pages') or []
-        if not mask:
-            return {'ok': False, 'message': '请先选择原生组件显示在哪些界面。'}
         def work():
-            self._event(title='正在应用界面选择', message='第 %s 屏将显示文字组件。'
-                        % '、'.join(str(p) for p in pages), phase='native')
+            if mask:
+                self._event(title='正在应用界面选择', message='第 %s 屏将显示文字组件。'
+                            % '、'.join(str(p) for p in pages), phase='native')
+            else:
+                self._event(title='正在关闭文字组件', message='所有界面都不再叠文字。', phase='native')
             bridge = self._core.dash()
             result = bridge.native_mask(mask, on_line=self._line)
-            self._event(native=True, nativeSent=result.get('masks', 0), title='界面选择已应用',
-                        message='已写入键盘内存：第 %s 屏。翻到这些界面即可看到文字。'
-                                % '、'.join(str(p) for p in pages), phase='done')
+            if mask:
+                self._event(native=True, nativeSent=result.get('masks', 0), title='界面选择已应用',
+                            message='已写入键盘内存：第 %s 屏。翻到这些界面即可看到文字。'
+                                    % '、'.join(str(p) for p in pages), phase='done')
+            else:
+                self._event(native=False, nativeSent=result.get('masks', 0),
+                            nativeReady=False, title='文字组件已关闭',
+                            message='键盘内存里的四行文字已清空，所有界面恢复原厂内容。', phase='done')
         return self._job('native-pages', work)
 
     def native_push(self):
@@ -421,11 +430,9 @@ class Api:
         return self._job('native-push', work)
 
     def _native_mask(self):
-        pages = self._config.get('native_pages') or []
-        if not pages:
-            return None
+        """页掩码；0 = 一个界面都不显示（等于关闭文字组件）。"""
         mask = 0
-        for page in pages:
+        for page in self._config.get('native_pages') or []:
             mask |= 1 << (page - 1)
         return mask
 
@@ -437,7 +444,7 @@ class Api:
             mask = self._native_mask()
             pages = self._config.get('native_pages') or []
             if not mask:
-                raise ValueError('请先选择原生组件显示在哪些界面。')
+                raise ValueError('当前没有选中任何界面：先在上面勾选要显示文字的界面，文字组件才会开始同步。')
             self._event(native=True, nativeSent=0, phase='native', title='正在打开文字通道',
                         message='第 %s 屏会显示文字组件。' % '、'.join(str(p) for p in pages))
             process = bridge.native_popen()
@@ -546,6 +553,13 @@ class Api:
             self._event(title='正在匹配全屏补丁', message='保留本机配置，生成对应补丁。', progress=35, phase='prepare')
             result = self._core.generate(baseline, target, force=force)
             self._line(json.dumps(result, ensure_ascii=False))
+            # 强制模式的真实下限：一层补丁的旧字节都对不上时，只能盲套最基础的一层，
+            # 而「去掉上传进度条」那几条补丁在更后面的一层里。既然用户已经勾了强制，
+            # 就继续刷，但必须先把这件事说明白，不能让刷完才发现进度条还在。
+            if result.get('forceBlind'):
+                self._line('警告：这把键盘的固件布局与已知版本全都对不上，只套了最基础的一层。')
+                self._event(title='进度条不会被去掉', message='布局对不上，只套了最基础的一层补丁：'
+                            '浏览器上传时的进度条和覆盖层会保留，其余功能正常。完整备份已保留。')
             # Persist recovery before the first possible erase, even if the flash later fails.
             atomic_json(folder / 'session.json', {'force': force, 'created': dt.datetime.now().isoformat(), 'result': result})
             atomic_json(self._dir / 'last-session.json', {'id': sid})
@@ -554,7 +568,8 @@ class Api:
             self._core.maintain('flash', baseline, target, yes=True, force=force, on_line=self._line)
             self._event(title='正在重新连接', message='写入校验通过，正在返回键盘界面。', progress=95, phase='reconnect')
             self._core.node_run('tools/leave_mcu.js', on_line=self._line)
-            self._event(title='全屏补丁已完成', message='现在可以在官方程序导入全屏图片和 GIF。', phase='done', progress=100)
+            finished = '全屏补丁已完成' if not result.get('forceBlind') else '补丁已完成（进度条仍在）'
+            self._event(title=finished, message='现在可以在官方程序导入全屏图片和 GIF。', phase='done', progress=100)
         return self._job('patch', work)
 
     def restore(self, confirmed=False):
@@ -686,6 +701,16 @@ def run(smoke=False):
                 text = window.evaluate_js("document.querySelectorAll('#native-preview span').length")
                 if text != 4:
                     result['error'] = 'native text preview not rendered'
+                # 「关闭文字组件」入口必须存在，且空选必须映射到掩码 0（这是关闭的唯一机制）。
+                off = window.evaluate_js("document.getElementById('native-off')?.textContent")
+                if not off:
+                    result['error'] = 'native off switch not rendered'
+                if api._page_selection([]) != []:
+                    result['error'] = 'empty page selection rejected'
+                if api._native_mask() != 0:
+                    result['error'] = 'empty page selection did not map to mask 0'
+                if api._page_selection([2, 4, 6]) != [2, 4, 6]:
+                    result['error'] = 'page selection lost its order'
         except Exception as exc:
             result['error'] = str(exc)
         finally:

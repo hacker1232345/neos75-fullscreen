@@ -83,12 +83,15 @@ function paintNative(busy) {
   $('native-send').disabled = busy || !config.widgets.length;
   $('native-stream').disabled = running ? false : (busy || !nativePages().length || !config.widgets.length);
   $('native-stream').textContent = running ? '停止连续发送' : '连续发送';
+  // 关闭按钮只在真的开着的时候可点：已经清空就不必再写一次。
+  $('native-off').disabled = busy;
+  $('native-off').textContent = nativePages().length ? '关闭文字组件' : '文字组件已关闭';
 }
 async function refreshNative() { const r = await call('native_preview'); if(!r.ok) toast(r.message || '未生成文字画面'); await poll(); }
 async function boot(bridge) { if(ready) return; api=bridge; const data=await api.bootstrap(); registry=data.registry; config=data.config; if(data.native) nativeInfo={...nativeInfo,...data.native}; ready=true; $('version').textContent=`v${data.version}`; $('backup-path').textContent=data.backupDirectory; renderList(); renderCatalog(); await poll(); setInterval(poll,700); }
 $('tab-fullscreen').onclick=()=>showTab('fullscreen'); $('tab-widgets').onclick=()=>showTab('widgets');
 $('connect').onclick=async()=>{const r=await call('connect');if(!r.ok)toast(r.message);await poll();};
-$('patch').onclick=()=>{const force=$('force').checked; confirm(force?'无验证应用补丁':'应用全屏补丁',force?'将跳过版本与旧字节检查。固定偏移可能不兼容，并有导致屏幕无法启动的风险。仍然继续？':'程序会先保存这把键盘的完整备份，再自动匹配固件、应用补丁并回验。已是全屏版本则直接跳过；未知版本会停止。部分适配配置尚待实机验收。','备份并应用',()=>call('patch',true,force));};
+$('patch').onclick=()=>{const force=$('force').checked; confirm(force?'无验证应用补丁':'应用全屏补丁',force?'程序会先备份，再按旧字节逐条核对能套上几层补丁。若一层都对不上，只会套最基础的一层：上传进度条和覆盖层会保留，其余功能照常。固定偏移仍可能不兼容，并有导致屏幕无法启动的风险。仍然继续？':'程序会先保存这把键盘的完整备份，再自动匹配固件、应用补丁并回验。已是全屏版本则直接跳过；未知版本会停止。部分适配配置尚待实机验收。','备份并应用',()=>call('patch',true,force));};
 $('confirm-action').onclick=async()=>{ $('confirmation').close(); const result=await confirmAction(); if(!result.ok)toast(result.message); await poll(); };
 for(const b of document.querySelectorAll('.close')) b.onclick=()=>b.closest('dialog').close();
 for(const id of ['add-widget','empty-add']) $(id).onclick=()=>{renderCatalog();openDialog('catalog');$('search').focus();};
@@ -107,6 +110,8 @@ $('codex-form').onsubmit=async e=>{e.preventDefault();const thread=$('codex-thre
 $('native-refresh').onclick=refreshNative;
 $('native-check').onclick=async()=>{const r=await call('native_probe');if(!r.ok)toast(r.message);await poll();};
 $('native-apply').onclick=async()=>{const r=await call('native_pages');if(!r.ok)toast(r.message);await poll();};
+// 一键关闭：把「显示在哪些界面」清空再应用，等于给键盘写掩码 0，四行文字立刻从所有界面消失。
+$('native-off').onclick=async()=>{ if(nativePages().length) await save({...config, native_pages: []}); const r=await call('native_pages'); if(!r.ok) toast(r.message); else toast('已关闭文字组件，所有界面恢复原厂内容。'); await poll(); };
 $('native-send').onclick=async()=>{const r=await call('native_push');if(!r.ok)toast(r.message);await poll();};
 $('native-stream').onclick=async()=>{ if(state.kind==='native-stream') {await call('stop');await poll();return;} const r=await call('native_start');if(!r.ok)toast(r.message);await poll();};
 $('native-interval').onchange=async e=>save({...config,native_interval:Number(e.target.value)});

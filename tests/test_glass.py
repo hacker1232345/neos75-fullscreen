@@ -247,13 +247,28 @@ class GlassWorkflow(unittest.TestCase):
         self.core.node_run.assert_not_called()
         self.core.dash.return_value.native_once.assert_not_called()
 
-    def test_native_mask_request_refused_before_usb_access(self):
+    def test_native_start_needs_at_least_one_page(self):
+        """连续发送必须有页面可写；空选只用于「关闭」，不能开通道。"""
         self.assertTrue(self.api.configure({'widgets': ['cpu']})['ok'])
-        self.assertFalse(self.api.native_pages()['ok'])
         self.api.native_start()
         self.wait()
         self.assertEqual(self.api.snapshot()['state']['phase'], 'error')
         self.core.dash.return_value.native_popen.assert_not_called()
+
+    def test_native_off_switch_writes_mask_zero(self):
+        """清空页选择后应用 = 掩码 0 = 干净的关闭，而不是报错。"""
+        self.assertTrue(self.api.configure({'widgets': ['cpu'], 'native_pages': [1, 2, 3]})['ok'])
+        self.assertTrue(self.api.configure({'widgets': ['cpu'], 'native_pages': []})['ok'])
+        self.assertEqual(self.api._native_mask(), 0)
+        self.core.dash.return_value.native_mask.return_value = {'masks': 1, 'displayVerified': False}
+        self.assertTrue(self.api.native_pages()['ok'])
+        self.wait()
+        self.assertEqual(self.core.dash.return_value.native_mask.call_args.args, (0,))
+        state = self.api.snapshot()['state']
+        self.assertFalse(state['native'])
+        self.assertFalse(state['nativeReady'])
+        self.assertEqual(state['phase'], 'done')
+        self.assertEqual(state['title'], '文字组件已关闭')
 
     def test_native_pages_writes_only_the_mask(self):
         self.assertTrue(self.api.configure({'widgets': ['cpu'], 'native_pages': [2, 4, 6]})['ok'])

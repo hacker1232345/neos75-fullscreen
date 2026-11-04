@@ -71,6 +71,63 @@ def plan_chain(applicable):
 def patchable(kind):
     return kind in ('supported-original','upgradeable')
 
+def roots(ms=None):
+    """每条链的链首 layer（没有 parent，或者 parent 不在目录里）。"""
+    ms=ms or manifests()
+    prof={m['profile'] for m in ms}
+    return [m for m in ms if not m.get('parent') or m['parent'] not in prof]
+
+def force_layers(source,ms=None):
+    """强制模式（备份代码哈希未命中任何已知构建）时，到底能套哪些层。
+
+    旧行为是 `layers=[ms[0]]`——只套链首 reference 层，于是 clean 层（去掉上传进度环
+    的那五条补丁）永远不生效，未知固件的用户刷完仍然会看到进度条。
+
+    新行为是**先试后写**：对每条链从链首开始逐层检查，一层的所有旧字节必须原位原样
+    匹配才应用，任何一条对不上就停在这一层之前。在每条链里取「套得最多」的那一串，
+    再在所有链之间取最长的一条。
+
+    注意必须从**链首**开始连续判断，不能从中间某层开始——否则会出现「clean 层没套上、
+    却把挂在 clean 之后的 widget 层单独套进去」的半套状态，比不套更危险。
+
+    这样三种真实情形都能正确处理：
+      * 未知固件只是版本差异、补丁地址没动 → 每层旧字节都对得上 → 整条链照样走完；
+      * 布局真的迁移了（Issue #1 那种）→ 链首就对不上 → 每条链都返回空；
+      * 中间某一层对不上 → 停在它之前，只应用前面确实匹配的层。
+    """
+    ms=ms or manifests()
+    size=len(source)
+    best=[]
+    for head in roots(ms):
+        if head['payload_bytes']!=size:
+            continue
+        trial=bytearray(source)
+        applied=[]
+        for layer in plan_chain(head):
+            if layer['payload_bytes']!=size:
+                break
+            ok=True
+            for p in layer['patches']:
+                o=int(p['offset'],16);before=bytes.fromhex(p['before'])
+                if o<256 or o+len(before)>layer['immutable_payload_bytes'] or bytes(trial[o:o+len(before)])!=before:
+                    ok=False
+                    break
+            if not ok:
+                break
+            for p in layer['patches']:
+                o=int(p['offset'],16)
+                trial[o:o+len(bytes.fromhex(p['after']))]=bytes.fromhex(p['after'])
+            applied.append(layer)
+        if len(applied)>len(best):
+            best=applied
+    return best
+
+def force_head(source,ms=None):
+    """强制模式的兜底：一层旧字节都对不上时，仍然只套链首（保持 v1.5.0 的旧行为）。"""
+    ms=ms or manifests()
+    same=[m for m in roots(ms) if m['payload_bytes']==len(source)]
+    return (same or [m for m in ms if m['payload_bytes']==len(source)] or ms)[0]
+
 def firmware_info(source):
     source=bytes(source)
     applied,applicable,kind=identify(source)
@@ -96,8 +153,19 @@ def patch(source, force=False):
     if not force and not patchable(kind):
         raise ValueError('备份长度或代码区域SHA256不匹配，未找到对应固件配置。' if kind=='unsupported-version'
                          else '备份已是全屏版，不能作为原版生成补丁。')
-    layers=plan_chain(applicable) if applicable else [ms[0]]
-    if layers[0]['payload_bytes']!=len(source):
+    # 正常路径：按哈希衔接。
+    # 强制路径：先试后写（逐层核对旧字节，对得上才应用）；一层都对不上才退回「只套链首」。
+    matched=True
+    if applicable:
+        layers=plan_chain(applicable)
+    elif force:
+        layers=force_layers(source,ms)
+        if not layers:
+            layers=[force_head(source,ms)]
+            matched=False
+    else:
+        layers=[ms[0]]
+    if not layers or layers[0]['payload_bytes']!=len(source):
         raise ValueError('原始备份长度不完整，拒绝生成。')
     code_bytes=layers[0]['immutable_payload_bytes']
     out=bytearray(source)
@@ -114,12 +182,13 @@ def patch(source, force=False):
     changed=sum(a!=b for a,b in zip(source,out))
     if out[:256]!=source[:256]:
         raise ValueError('补丁范围不符合约束')
+    if bytes(out[code_bytes:len(source)])!=source[code_bytes:]:
+        raise ValueError('生成目标代码或配置保留校验不匹配')
     leaf=layers[-1]
     if not force:
         expected=sum(m['changed_bytes'] for m in layers)
         if (changed!=expected
-                or hashlib.sha256(bytes(out[:code_bytes])).hexdigest()!=leaf['target_code_sha256']
-                or bytes(out[code_bytes:len(source)])!=source[code_bytes:]):
+                or hashlib.sha256(bytes(out[:code_bytes])).hexdigest()!=leaf['target_code_sha256']):
             raise ValueError('生成目标代码或配置保留校验不匹配')
     out.extend(bytes.fromhex(leaf['dfu_suffix_prefix_hex']))
     out.extend(struct.pack('<I',(~zlib.crc32(out))&0xffffffff))
@@ -129,7 +198,11 @@ def patch(source, force=False):
           'appliedLabels':[m['label'] for m in layers],
           'actual_source_sha256':hashlib.sha256(source).hexdigest(),
           'target_sha256':hashlib.sha256(result).hexdigest(),
-          'changed_bytes':changed,'force':force}
+          'changed_bytes':changed,'force':force,
+          # 强制模式下这些层是「旧字节逐条核对通过」才应用的；False 表示一次都没对上、
+          # 只按链首固定地址盲套（此时输出不可当已验证结果看待）。
+          'forceLayersMatched':matched and bool(force),
+          'forceBlind':bool(force) and not matched}
     return result,meta
 
 if __name__=='__main__':

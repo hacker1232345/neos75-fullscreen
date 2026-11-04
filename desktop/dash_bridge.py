@@ -316,8 +316,9 @@ def native_frame(rows, mask=None):
             raise DashboardError('原生组件需要正好四行文字。')
         payload['rows'] = [str(r) for r in rows]
     if mask is not None:
-        if isinstance(mask, bool) or not isinstance(mask, int) or not 1 <= mask <= 0x3f:
-            raise DashboardError('页掩码必须是 1..0x3f 的整数。')
+        # mask=0 是合法的：表示六页全不显示，等于把文字组件关掉（设备实测回 0xFE）。
+        if isinstance(mask, bool) or not isinstance(mask, int) or not 0 <= mask <= 0x3f:
+            raise DashboardError('页掩码必须是 0..0x3f 的整数（0 表示关闭）。')
         payload['mask'] = mask
     return json.dumps(payload, ensure_ascii=False)
 
@@ -340,8 +341,8 @@ def native_popen(on_line=None):
 
 def native_mask(mask, timeout=20, on_line=None):
     """只写页掩码：决定哪些界面显示文字组件（写 RAM，不写 Flash）。"""
-    if isinstance(mask, bool) or not isinstance(mask, int) or not 1 <= mask <= 0x3f:
-        raise DashboardError('页掩码必须是 1..0x3f 的整数。')
+    if isinstance(mask, bool) or not isinstance(mask, int) or not 0 <= mask <= 0x3f:
+        raise DashboardError('页掩码必须是 0..0x3f 的整数（0 表示关闭）。')
     return native_once(None, mask=mask, timeout=timeout, on_line=on_line, frames_only=False)
 
 

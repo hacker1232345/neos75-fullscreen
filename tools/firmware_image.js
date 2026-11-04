@@ -85,20 +85,72 @@ function firmwareInfo(image){
   upgradeValidation:kind==='upgradeable'?applicable.validation:null,
  };
 }
+/**
+ * 每条链的链首 layer（没有 parent，或者 parent 不在目录里）。
+ * issue1 没有 parent 字段，它自成一链的链首；reference 是主链的链首。
+ */
+function roots(){
+ const known=new Set(profiles.map(m=>m.profile));
+ return profiles.filter(m=>!m.parent||!known.has(m.parent));
+}
+/**
+ * 强制模式（备份代码哈希未命中任何已知构建）时，到底能套哪些层。
+ *
+ * 旧行为是 `layers=[manifest]`——只套链首 reference 层，于是 clean 层（去掉上传进度环
+ * 的那五条补丁）永远不生效，未知固件的用户刷完仍然会看到进度条。
+ *
+ * 新行为是**先试后写**：对每条链从链首开始逐层检查，一层的所有旧字节必须原位原样匹配
+ * 才应用，任何一条对不上就停在这一层之前。先在某条链里取套得最多的前缀，再在所有链
+ * 之间取最长的一条。
+ *
+ * 必须从链首开始连续判断，不能从中间某层开始——否则会出现「clean 层没套上、却把挂在
+ * clean 之后的 widget 层单独套进去」的半套状态，比不套更危险。
+ */
+function forceLayers(source){
+ const size=source.length,wanted=[];
+ for(const head of roots()){
+  if(head.payload_bytes!==size)continue;
+  const trial=Buffer.from(source),applied=[];
+  for(const layer of planChain(head)){
+   if(layer.payload_bytes!==size)break;
+   const ok=layer.patches.every(p=>{
+    const o=parseInt(p.offset,16),before=Buffer.from(p.before,'hex');
+    return o>=256&&o+before.length<=layer.immutable_payload_bytes&&trial.subarray(o,o+before.length).equals(before);
+   });
+   if(!ok)break;
+   for(const p of layer.patches)Buffer.from(p.after,'hex').copy(trial,parseInt(p.offset,16));
+   applied.push(layer);
+  }
+  if(applied.length>wanted.length)wanted.splice(0,wanted.length,...applied);
+ }
+ return wanted;
+}
+/** 强制模式的兜底：一层旧字节都对不上时，仍然只套链首（保持旧行为）。 */
+function forceHead(source){
+ const size=source.length,same=roots().filter(m=>m.payload_bytes===size);
+ return (same.length?same:profiles.filter(m=>m.payload_bytes===size)).at(0)||manifest;
+}
 function selectManifest(image,force=false){
  const {applicable,kind}=identify(image);
  if(applicable&&(force||patchable(kind)))return applicable;
- if(force&&profiles.some(m=>m.payload_bytes===image.length))return manifest;
+ if(force&&profiles.some(m=>m.payload_bytes===image.length)){
+  const matched=forceLayers(Buffer.from(image));
+  return matched.length?matched[0]:forceHead(Buffer.from(image));
+ }
  throw Error('原始备份长度或代码区域SHA256不匹配，未找到对应固件配置');
+}
+function planFor(source,force=false){
+ const {applicable,kind}=identify(source);
+ if(!profiles.some(m=>m.payload_bytes===source.length))throw Error('原始备份长度不完整');
+ if(applicable&&(force||patchable(kind)))return {layers:planChain(applicable),blind:false};
+ if(!force)throw Error('原始备份长度或代码区域SHA256不匹配，未找到对应固件配置');
+ const matched=forceLayers(source);
+ if(matched.length)return {layers:matched,blind:false};
+ return {layers:[forceHead(source)],blind:true};
 }
 function buildFirmware(source,force=false){
  if(!Buffer.isBuffer(source))source=Buffer.from(source);
- const {applicable,kind}=identify(source);
- if(!profiles.some(m=>m.payload_bytes===source.length))throw Error('原始备份长度不完整');
- let layers;
- if(applicable&&(force||patchable(kind)))layers=planChain(applicable);
- else if(force)layers=[manifest];
- else throw Error('原始备份长度或代码区域SHA256不匹配，未找到对应固件配置');
+ const plan=planFor(source,force),layers=plan.layers;
  const m=layers[layers.length-1];
  if(source.length!==m.payload_bytes)throw Error('原始备份长度不完整');
  const out=Buffer.from(source);let changed=0;
@@ -111,9 +163,13 @@ function buildFirmware(source,force=false){
  }
  for(let i=0;i<source.length;i++)if(source[i]!==out[i])changed++;
  const expected=layers.reduce((n,l)=>n+l.changed_bytes,0);
- if((!force&&(changed!==expected||sha(out.subarray(0,m.immutable_payload_bytes))!==m.target_code_sha256))||!out.subarray(m.immutable_payload_bytes).equals(source.subarray(m.immutable_payload_bytes)))throw Error('目标代码或配置保留校验失败');
+ // 尾 4096 字节是本机现场配置，任何模式都不许动。
+ if(!out.subarray(m.immutable_payload_bytes).equals(source.subarray(m.immutable_payload_bytes)))throw Error('目标代码或配置保留校验失败');
+ if(!force&&(changed!==expected||sha(out.subarray(0,m.immutable_payload_bytes))!==m.target_code_sha256))throw Error('目标代码或配置保留校验失败');
  const result=Buffer.concat([out,Buffer.from(m.dfu_suffix_prefix_hex,'hex'),Buffer.alloc(4)]);
  let crc=0xffffffff;for(const v of result.subarray(0,-4)){crc^=v;for(let k=0;k<8;k++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);} // DFU stores complement of standard CRC32.
- result.writeUInt32LE(crc>>>0,result.length-4);return result;
+ result.writeUInt32LE(crc>>>0,result.length-4);
+ buildFirmware.lastPlan={layers:layers.map(l=>l.profile),blind:plan.blind};return result;
 }
-module.exports={firmwareKind,firmwareInfo,selectManifest,buildFirmware,identify,chainOf,planChain,depth,patchable,manifest,profiles};
+buildFirmware.plan=planFor;
+module.exports={firmwareKind,firmwareInfo,selectManifest,buildFirmware,identify,chainOf,planChain,depth,patchable,roots,forceLayers,forceHead,planFor,manifest,profiles};

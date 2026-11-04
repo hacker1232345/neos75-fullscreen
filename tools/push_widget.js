@@ -22,10 +22,12 @@ function parseMask(text) {
   if (typeof text !== 'string' || !text.length) throw Error('需要页掩码，例如 2,4,6 或 0x2a');
   if (/^0x[0-9a-f]+$/i.test(text)) {
     const mask = parseInt(text, 16);
-    if (!(mask >= 1 && mask <= 0x3f)) throw Error('页掩码必须在 1..0x3f');
+    if (!(mask >= 0 && mask <= 0x3f)) throw Error('页掩码必须在 0..0x3f（0 表示关闭）');
     return mask;
   }
-  return w.maskFromPages(text.split(',').map(x => Number(x.trim())));
+  const parts = text.split(',').map(x => x.trim()).filter(Boolean);
+  if (!parts.length || (parts.length === 1 && ['none', 'off', '0'].includes(parts[0].toLowerCase()))) return 0;
+  return w.maskFromPages(parts.map(Number));
 }
 
 async function loop(emit) {

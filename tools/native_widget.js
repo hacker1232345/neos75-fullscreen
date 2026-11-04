@@ -40,18 +40,19 @@ function rowPacket(row, text) {
   return packet([0, 0x4e, 0x37, 1, row, text.length, ...Buffer.from(text, 'ascii')]);
 }
 
+// mask = 0 是合法值：设备接受它并把文字组件彻底关掉（实测回 0xFE，随后 probe 变 0xFD）。
 function maskPacket(mask) {
-  if (!Number.isInteger(mask) || mask < 1 || mask > 0x3f) throw Error('mask must be 1..0x3f (pages 1..6)');
+  if (!Number.isInteger(mask) || mask < 0 || mask > 0x3f) throw Error('mask must be 0..0x3f (pages 1..6, 0=off)');
   return packet([0, 0x4e, 0x37, 1, 0x7f, 1, mask]);
 }
 
+// 空数组 → 0，表示六页全不显示。选页与关掉是同一件事，不需要单独的「关闭」命令。
 function maskFromPages(pages) {
   let mask = 0;
   for (const p of pages) {
     if (!Number.isInteger(p) || p < 1 || p > 6) throw Error(`page ${p} outside 1..6`);
     mask |= 1 << (p - 1);
   }
-  if (!mask) throw Error('at least one page must be selected');
   return mask;
 }
 

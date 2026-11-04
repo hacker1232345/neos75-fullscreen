@@ -69,7 +69,10 @@ def generate(source, destination, overwrite=False, force=False):
         if temp.exists():
             temp.unlink()
     return {'output': str(dst), 'bytes': len(result), 'sha256': m['target_sha256'], 'changed_bytes': m['changed_bytes'], 'force': force, 'profile': m['profile'], 'profileLabel': m['label'], 'validation': m['validation'],
-            'appliedProfiles': m.get('appliedProfiles', [m['profile']]), 'appliedLabels': m.get('appliedLabels', [m['label']])}
+            'appliedProfiles': m.get('appliedProfiles', [m['profile']]), 'appliedLabels': m.get('appliedLabels', [m['label']]),
+            # force 时这两项说明「到底套上了几层」：matched=逐条旧字节核对通过，
+            # blind=一层都没对上、只按链首固定地址盲套（此时进度条多半还在）。
+            'forceLayersMatched': bool(m.get('forceLayersMatched')), 'forceBlind': bool(m.get('forceBlind'))}
 
 
 def node_run(script, args=(), baseline=None, on_line=None):
