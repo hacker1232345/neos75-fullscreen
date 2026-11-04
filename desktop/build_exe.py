@@ -141,13 +141,18 @@ def main():
     # PyInstaller 的静态分析看不见它里面的 `from keystone import Ks` 和 `from capstone import Cs`。
     # 少了这两个包，打包版一碰到不认识的固件就会死于 "No module named 'keystone'"。
     # 动态库要和模块放在同一层：这两个包都按自己 __file__ 的位置去找 .dll。
+    # keystone 是可选件：PyPI 不给 macOS arm64 出 wheel，那颗 runner 上装不了。
+    # 少了它，注入层没法重新汇编（工具会说明并只套前面几层），但程序照样要能打包出去。
+    missing = []
     for module in ('keystone', 'capstone'):
         try:
             binaries.extend(collect_dynamic_libs(module))
-        except Exception as exc:                  # pragma: no cover - 打包前的提示
-            raise SystemExit('打包需要 %s：先 pip install -r requirements-dev.txt（%s）' % (module, exc))
-    hidden = ['glass', 'webview', 'psutil', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont',
-              'keystone', 'capstone']
+        except Exception:                         # pragma: no cover - 平台差异
+            missing.append(module)
+    if 'capstone' in missing:
+        raise SystemExit('打包需要 capstone：先 pip install -r requirements-dev.txt')
+    hidden = ['glass', 'webview', 'psutil', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont']
+    hidden += [m for m in ('keystone', 'capstone') if m not in missing]
     if sys.platform == 'linux':
         hidden += ['webview.platforms.qt', 'qtpy', 'PySide6.QtWebEngineCore',
                    'PySide6.QtWebEngineWidgets', 'PySide6.QtWebChannel', 'PySide6.QtNetwork']

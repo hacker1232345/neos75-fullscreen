@@ -34,11 +34,22 @@ v1.6.0 做的内容锚点适配只存在于命令行，桌面这条路没接上�
 - **已经是最新版就别去试适配**：链末镜像的空闲带已被占用，跑适配器会抛
   `命令表 0x3D 项与预期不符`，用户看到的是内部错误。改成在 `already-fullscreen` 时先说
   「备份已是全屏版」。
-- 测试：`tests/test_adapt.py::BuilderWiring` 5 项（未知固件必须适配、进度条去没去要说得准、
-  已是最新版要给人话而不是内部错误、尺寸不对仍拒绝、垃圾镜像给可读原因）；`test_glass.py`
+- **keystone 变成可选件**：CI 四平台全挂在同一个 `No module named 'keystone'` ——
+  仓库依赖清单里根本没写它，本机却早就装好了，所以本地永远绿。现在写进
+  `requirements-dev.txt`，但 PyPI **不给 macOS arm64 出 wheel**，那一档用环境标记跳过。
+  缺了它时注入层降级（`build_widget.keystone_ready()`），而 `best_chain()` 改成取
+  「最长可用前缀」—— 断在注入层不再连累前面的层，去进度条照样生效；掉队的层写进
+  `dropped` 报给上层。打包脚本同样改成 capstone 必需、keystone 有就带上。
+- **陌生固件也要过一道物理检查**：适配把「不认识」变成「照样打补丁」，代价是坏备份
+  也会被当成新版本。`plausible_vectors()` 只查两件必然成立的事 —— 栈顶落在 64 KB RAM 里、
+  复位向量（镜像内偏移 + `0x08008000`）落在代码区。随机字节和半截镜像因此被挡在适配器之前。
+  实测这四个向量值是 `SP=0x2000c548`、`reset=0x81bd`，四份已知镜像完全一致。
+- 测试：`tests/test_adapt.py::BuilderWiring` 7 项（未知固件必须适配、进度条去没去要说得准、
+  已是最新版要给人话而不是内部错误、无 keystone 时前缀降级、向量表崩坏先拒、尺寸不对仍拒绝、
+  垃圾镜像给可读原因）；`test_glass.py`
   的旧用例改名 `test_unknown_firmware_is_still_adapted_instead_of_refused`（反过来钉死
   「不许再拒绝」），并新增 `test_unadaptable_firmware_keeps_the_backup_and_never_writes`
-  （套不上时不刷、备份留、报错含原因）。全量 **127 项 Python + 8 组 node 全绿**。
+  （套不上时不刷、备份留、报错含原因）。全量 **130 项 Python + 8 组 node 全绿**。
 - 实测：clean 镜像插 0x400 字节后自动适配 `changed=2369`、`adapted=true`、尾部未动；
   原版改版本字节后三层全套 `changed=2409`；四条负向用例（改尾部/改向量表/改未预期扇区/
   文件被换）各自拒绝且文案点名。

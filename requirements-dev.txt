@@ -1,6 +1,11 @@
 # Offline firmware/emulation tooling (tools/test_arm_emulation.py).
 capstone==5.0.9
 unicorn==2.1.4
+# Runtime-loaded by tools/build_widget.py: keystone reassembles the injected code
+# for an unknown firmware layout. PyPI ships no arm64 macOS wheel, so that one
+# platform skips it -- build_widget then refuses only the injection layer and
+# the layers before it still apply.
+keystone-engine==0.9.2; not (sys_platform == "darwin" and platform_machine == "arm64")
 # Screen-widget renderer. dashboard/render.py imports PIL directly, so both the
 # source-mode tests (tests/test_dashboard.py, dashboard/selftest.js) and the
 # packaged build (desktop/build_exe.py freezes render.py into Neos75-Render)

@@ -19,7 +19,11 @@ import struct
 import zlib
 from pathlib import Path
 
-from keystone import Ks, KS_ARCH_ARM, KS_MODE_THUMB
+try:
+    from keystone import Ks, KS_ARCH_ARM, KS_MODE_THUMB
+except ImportError:      # macOS arm64 没有 wheel：注入层降级，其它层照打
+    Ks = None
+    KS_ARCH_ARM = KS_MODE_THUMB = 0
 
 BASE = 0x8000
 LENGTH = 491520
@@ -152,7 +156,13 @@ def fix_branches(data, start, text):
     return bytes(out)
 
 
+def keystone_ready():
+    return Ks is not None
+
+
 def asm(text, start, end):
+    if Ks is None:
+        raise ValueError('这台机器没有 keystone：没法把注入层重新汇编成新布局的机器码')
     enc, _ = Ks(KS_ARCH_ARM, KS_MODE_THUMB).asm(text, addr=start)
     data = fix_branches(bytes(enc), start, text)
     if len(data) > end - start or len(data) % 2:

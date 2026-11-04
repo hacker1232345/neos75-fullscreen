@@ -247,6 +247,41 @@ class BuilderWiring(unittest.TestCase):
         self.assertIn('已是全屏版', msg)
         self.assertNotIn('0x3D', msg)
 
+    def test_without_keystone_the_layers_before_the_injection_still_apply(self):
+        # macOS arm64 上没有 keystone 的 wheel。注入层套不上不该连累前两层 ——
+        # 去进度条那几层只靠旧字节就能定位，用户至少该拿到它们。
+        report = {'layers': [], 'chains': [
+            {'root': 'reference-66679ff2',
+             'steps': ['reference-66679ff2', 'clean-8465dd63', 'widget-dce6dce7'],
+             'verdicts': ['ready', 'ready', 'blocked'], 'reached': 'blocked'}]}
+        self.assertEqual(A.best_chain(report),
+                         ['reference-66679ff2', 'clean-8465dd63'],
+                         '断在注入层时，前面已经能套上的层不许一起丢掉')
+
+    def test_without_keystone_the_blocker_names_the_real_reason(self):
+        import build_widget
+        saved = build_widget.Ks
+        build_widget.Ks = None
+        try:
+            layer = next(L for L in A.layers() if L['profile'] == 'widget-dce6dce7')
+            entries, blockers, info = A.plan_injection(self.shifted(
+                self.base('8465dd6334eb0dc0d0862477b5df05c5d957b1bfe3d19ba1ad222fd3397ef4b7')
+                or bytes(491520)), layer)
+        finally:
+            build_widget.Ks = saved
+        self.assertEqual(entries, [])
+        self.assertTrue(blockers)
+        self.assertIn('keystone', blockers[0]['reason'])
+
+    def test_broken_vector_table_is_refused_before_adapting(self):
+        # 适配把「不认识」变成「照样打补丁」，代价是坏备份也会被当成新版本。
+        # 栈顶越界/复位点跑到数据区的镜像必须直接拒，不能进适配器。
+        junk = bytearray(491520)
+        junk[:8] = bytes.fromhex('00000000 00000000')
+        self.assertFalse(self.BF.plausible_vectors(bytes(junk)))
+        with self.assertRaises(ValueError):
+            self.BF.patch(bytes(junk))
+
     def test_build_still_refuses_a_bogus_sized_backup(self):
         with self.assertRaises(ValueError):
             self.BF.patch(bytes(PAYLOAD - 8), force=False)

@@ -173,6 +173,13 @@ def _adapt_reason(report):
     if not blocked and not partial:
         return None
     kinds=sorted({b['kind'] for L in blocked+partial for b in L.get('blockers',())})
+    reasons=' '.join(str(b.get('reason') or '') for L in blocked+partial for b in L.get('blockers',()))
+    if 'keystone' in reasons:
+        # 这不是「固件有问题」，是「这台机器装不了汇编器」。必须分开讲，
+        # 否则用户会以为自己的固件不兼容，跑去刷别的东西。
+        return ('这份固件能认出来，但当前这台电脑缺少重新汇编需要的组件（keystone），'
+                '注入层的文字组件没法套上；能靠旧字节定位的层（比如去进度条）照常生效。'
+                '换成 Windows 或 Linux 机器再生成，就能把文字组件也带上。')
     if 'injection' in kinds and 'unresolved' in kinds:
         return ('这份固件把小组件要用到的那几个厂商函数改过了（签名对不上），'
                 '没法在不碰原厂逻辑的前提下把功能塞进去。补丁未做任何写入。')
@@ -183,6 +190,35 @@ def _adapt_reason(report):
         return ('在旧字节该出现的位置找到了不一样的内容：这份固件可能已经打过补丁，'
                 '或者被别的工具改过。请先把完整备份发上来。')
     return ('这份固件有几层补丁套不上（' + '、'.join(kinds) + '），为安全起见没有写入。')
+
+
+IMAGE_BASE = 0x08008000          # 应用运行时基址：bootloader 把镜像搬到这儿
+CODE_LENGTH = 487424             # 镜像里可执行的字节数（尾部 4096 是现场数据）
+
+
+def plausible_vectors(source):
+    '''这份镜像看起来是不是一块能启动的 Cortex-M 固件。
+
+    适配把「不认识」变成了「照样打补丁」，代价是连被改坏的备份也会被当成新版本。
+    这里只做两个必然成立的物理检查（所有已知版本都满足），把随机字节和半截镜像
+    挡在外面；更深的一致性没法验，那是「陌生固件」本身的含义。
+    '''
+    if len(source) < 256:
+        return False
+    import struct
+    sp, reset = struct.unpack('<II', bytes(source[:8]))
+    if not 0x20000000 <= sp < 0x20010000 or sp % 4:
+        return False        # 栈顶不在 64 KB RAM 里，不像这块板子的固件
+    if not reset & 1:
+        return False        # Thumb 位没置，跳过去就是 HardFault
+    # 实测这块板子的向量表存的是**镜像内偏移**（0x81bd），不是运行地址；
+    # bootloader 把它搬到 0x08000000 之后才成为 0x080081bd。
+    # 所以判据要按「偏移 + 应用基址」来算，并且必须落在代码区里：
+    # 复位点跑到数据区、空闲带或镜像之外，都不是能跑的固件。
+    target = (reset & ~1) + IMAGE_BASE
+    if not IMAGE_BASE <= target < IMAGE_BASE + CODE_LENGTH:
+        return False
+    return True
 
 
 def progress_removed(meta):
@@ -216,6 +252,10 @@ def patch(source, force=False):
         # 哈希对不上不等于没救：v1.6.0 起这里改成先试「按内容锚点现算偏移」。
         # 同一份固件只是布局迁移过（换批次/换编译），锚点照样能找回去，
         # 用户不该被迫去勾「无验证」然后把进度条留在屏幕上。
+        if not plausible_vectors(source):
+            raise ValueError('这份备份的前 8 个字节不像一块能启动的固件（栈顶或复位向量越界）：'
+                             '文件可能被截断、被别的工具改过，或者根本不是这块键盘的备份。'
+                             '补丁未做任何写入。')
         payload,meta=adapt(source)
         if payload:
             return payload,{**meta,

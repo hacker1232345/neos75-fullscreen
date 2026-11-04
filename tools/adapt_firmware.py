@@ -139,6 +139,14 @@ def plan_injection(img, layer, pages=None):
     import symbols
     import build_widget as bw
 
+    if not bw.keystone_ready():
+        # macOS arm64 上没有 keystone 的 wheel。前两层（去进度条）只靠旧字节就行，
+        # 不该因为第三层装不了就把整条链判成 blocked —— 那样这台机器上的用户
+        # 什么都得不到，而实际上进度条早就能去掉。
+        return [], [{'offset': p['offset'], 'kind': 'injection',
+                     'reason': '这台机器没装 keystone，注入层没法重新汇编（去进度条那几层不受影响）'}
+                    for p in layer['patches']], None
+
     sig_path = ANCHOR_DIR / 'symbols.json'
     if not sig_path.exists():
         return [], [{'offset': p['offset'], 'kind': 'injection',
@@ -253,7 +261,7 @@ def self_ok(img, layer):
         # 空闲带已经被别人占住时没法重汇编（`bw.patch` 会直接抛），这一层不可能当起点
         try:
             entries, blockers, _ = plan_injection(img, layer)
-        except ValueError:
+        except (ValueError, ImportError):
             return False
     else:
         entries, blockers = plan_layer(img, layer, doc)
@@ -377,6 +385,7 @@ def analyse(source, image_name='<firmware>'):
                          if r['verdict'] not in ('ready', 'empty', 'applied')), 'ready')
         report['chains'].append({'root': chain[0]['profile'],
                                  'steps': [r['profile'] for r in steps],
+                                 'verdicts': [r['verdict'] for r in steps],
                                  'reached': boundary})
     # 同一层可能在多条链里各判一次（比如「从 reference 起步」和「直接从 widget 起步」）。
     # 对外只留最好的那个结论，否则用户会同时看到「可用」和「不可用」两个自己。
@@ -730,11 +739,23 @@ def best_chain(report):
     order = {L['profile']: i for i, L in enumerate(layers())}
     best, best_rank = [], 99
     for c in report['chains']:
-        if c['reached'] != 'ready' or not c['steps']:
+        steps = c['steps']
+        verdicts = c.get('verdicts') or []
+        # 链在哪一层断掉，就把那层以及它后面的一起丢掉 —— 后面的层本来就依赖它
+        # （widget-none 改的就是 widget 注入的代码），留着只会算错。
+        # 但在断掉之前已经ready 的层是独立成立的：macOS arm64 上没有汇编器、
+        # 注入层套不上时，「去进度条」那两层照样该生效，不该连它们一起放弃。
+        cut = len(steps)
+        for i, v in enumerate(verdicts):
+            if v not in ('ready', 'empty', 'applied'):
+                cut = i
+                break
+        keep = steps[:cut]
+        if not keep:
             continue
         rank = order.get(c['root'], 99)
-        if len(c['steps']) > len(best) or (len(c['steps']) == len(best) and rank < best_rank):
-            best, best_rank = c['steps'], rank
+        if len(keep) > len(best) or (len(keep) == len(best) and rank < best_rank):
+            best, best_rank = keep, rank
     return best
 
 
@@ -763,6 +784,13 @@ def build_adapted(source, name='<firmware>'):
                 raise ValueError(f'{name_} 的 {p["offset"]} 旧字节对不上，不该走到这一步')
             cur = cur[:o] + a + cur[o + len(a):]
         applied.append(d)
+    # chain 只是层名的序列，判决要回报告里查。
+    by_name = {r['profile']: r for r in rep.get('layers', ())}
+    dropped = [{'profile': name, 'label': by_name.get(name, {}).get('label'),
+                'verdict': by_name.get(name, {}).get('verdict'),
+                'blockers': by_name.get(name, {}).get('blockers') or []}
+               for name in chain
+               if by_name.get(name, {}).get('verdict') not in ('ready', 'empty', 'applied')]
     if not applied:
         return None, rep, chain, None
     tail_ok = bytes(cur[CODE_BYTES:]) == source[CODE_BYTES:PAYLOAD_BYTES]
@@ -776,7 +804,8 @@ def build_adapted(source, name='<firmware>'):
         'label': applied[-1].get('label') or applied[-1]['derived_from'],
         'validation': 'content-anchored',
         'changed_bytes': sum(d['changed_bytes'] for d in applied),
-        'layers': applied}
+        'layers': applied,
+        'dropped': dropped}
 
 
 def main():
