@@ -79,6 +79,24 @@ python dashboard/native_rows.py --list           # 哪些部件能写成文字
 
 预设：`minimal` / `default` / `full` / `performance` / `network`，也可以任意勾选组合。
 
+### 四套配色（对应官方四种颜色）
+
+官方这台键盘有四种颜色：Venus 银 / Selene 灰 / Hades 黑 / Athena 白。渲染器把这四种都做成了主题，
+配色只是一套色板，布局与部件完全不变——换主题不会改变任何信息的排布。
+
+```sh
+python dashboard/render.py --in state.json --out a.jpg --theme hades    # 黑，原版深色
+python dashboard/render.py --in state.json --out b.jpg --theme selene   # 灰，石墨底 + 月光银蓝
+python dashboard/render.py --in state.json --out c.jpg --theme venus    # 银，银白底 + 香槟铜
+python dashboard/render.py --in state.json --out d.jpg --theme athena   # 白，象牙底 + 墨字柔金
+```
+
+桌面程序里在「屏幕预览」上方有一排配色按钮，点一下立刻重画预览，选中的配色会写进 `settings.json`，
+下次打开还是它。旧配置没有这一项时自动退回 Hades 黑，不会因为少了字段打不开。
+
+主题表的键名是固定的（`BG / CARD / CARD_HI / TRACK / LINE / TXT / DIM / FAINT / ACCENT / GOOD / WARN / BAD / NA / TOPLINE / WATERMARK`），
+新增配色只要往 `THEMES` 里加一条，绘制代码一行都不用动。
+
 ```sh
 python dashboard/render.py --list                    # 列出部件注册表
 node   dashboard/push.js info                        # 只读查询屏幕

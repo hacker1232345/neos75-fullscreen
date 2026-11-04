@@ -171,7 +171,7 @@ class Api:
         self._registry = self._renderer.registry_json()
         self._rows = load_native_rows()
         self._config = {'widgets': list(self._registry['presets']['minimal']), 'interval': 5,
-                        'native_pages': [], 'native_interval': 3}
+                        'native_pages': [], 'native_interval': 3, 'theme': 'hades'}
         self._native = {'ready': None, 'rows': ['', '', '', ''], 'omitted': [],
                         'supported': [w['id'] for w in self._registry['widgets']
                                       if w['id'] in self._rows.TEXT_WIDGETS],
@@ -217,6 +217,16 @@ class Api:
             raise ValueError('原生组件刷新间隔无效。')
         return value
 
+    def _theme(self, value):
+        """四套配色之一。留空或旧配置没有这个键时退回深色。"""
+        names = [t['id'] for t in self._registry.get('themes', [])]
+        if not names:
+            names = ['hades']
+        key = str(value or 'hades').strip().lower()
+        if key not in names:
+            raise ValueError('配色无效：可选 ' + '、'.join(names) + '。')
+        return key
+
     def _validate(self, config):
         ids = config['widgets']
         known = {w['id'] for w in self._registry['widgets']}
@@ -229,7 +239,8 @@ class Api:
             raise ValueError('刷新间隔无效。')
         valid = {'widgets': ids, 'interval': interval,
                  'native_pages': self._page_selection(config.get('native_pages', [])),
-                 'native_interval': self._native_interval(config.get('native_interval', 3))}
+                 'native_interval': self._native_interval(config.get('native_interval', 3)),
+                 'theme': self._theme(config.get('theme'))}
         if 'weather' in config:
             valid['weather'] = location(config['weather'])
         if 'codex_thread' in config:
@@ -296,6 +307,7 @@ class Api:
                     config=copy.deepcopy(self._config), backupDirectory=str(self._dir / 'backups'),
                     native=native,
                     nativeNote='文字组件直接写入键盘内存：每屏四行、只支持英文与数字，中文会显示为空。',
+                    themeNote='四套配色对应官方四种颜色：Hades 黑 / Selene 灰 / Venus 银 / Athena 白。',
                     sensorNote='温度、GPU、音量取决于系统数据源；不可用时显示 n/a。')
 
     def snapshot(self, revision=-1):
@@ -521,7 +533,9 @@ class Api:
         ids = list(self._config['widgets'])
         pages = self._renderer.paginate(ids)
         history = self._renderer.append_history(str(self._dir / 'history'), state)
-        frames = [self._renderer.render(state, widgets=page, quality=72, limit=30000, history=history)[0] for page in pages]
+        theme = self._config.get('theme')
+        frames = [self._renderer.render(state, widgets=page, quality=72, limit=30000,
+                                        history=history, theme=theme)[0] for page in pages]
         with self._mutex:
             self._preview = ['data:image/jpeg;base64,' + base64.b64encode(frame).decode('ascii') for frame in frames]
             self._revision += 1
@@ -729,6 +743,20 @@ def run(smoke=False):
                     result['error'] = 'empty page selection did not map to mask 0'
                 if api._page_selection([2, 4, 6]) != [2, 4, 6]:
                     result['error'] = 'page selection lost its order'
+                # 四色配色：按钮必须按注册表生成，默认选中深色，且切换后真的改变渲染结果。
+                chips = window.evaluate_js("document.querySelectorAll('#theme-chips button').length")
+                if chips != len(api._registry.get('themes', [])):
+                    result['error'] = 'theme chooser not rendered'
+                chosen = window.evaluate_js(
+                    "document.querySelector('#theme-chips button[aria-checked=\"true\"]')?.dataset.theme")
+                if chosen != api._config['theme']:
+                    result['error'] = 'theme chooser did not mark the active theme'
+                first = api._renderer.render(api._read_state(), widgets=api._config['widgets'],
+                                             theme='hades')[0]
+                second = api._renderer.render(api._read_state(), widgets=api._config['widgets'],
+                                              theme='athena')[0]
+                if first == second:
+                    result['error'] = 'two themes rendered identical pixels'
         except Exception as exc:
             result['error'] = str(exc)
         finally:

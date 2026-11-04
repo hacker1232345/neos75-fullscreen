@@ -162,10 +162,15 @@ def sample(count=1, interval_ms=1500, warmup=True, on_line=None):
 
 
 def render(state_path, out_path, widgets=None, preset='default', quality=72, limit=None,
-           preview=None, state_dir=None, on_line=None):
-    """调 dashboard/render.py 把状态 JSON 画成 480x360 baseline JPEG。离线，不碰设备。"""
+           preview=None, state_dir=None, on_line=None, theme=None):
+    """调 dashboard/render.py 把状态 JSON 画成 480x360 baseline JPEG。离线，不碰设备。
+
+    theme 是四套配色之一（hades/selene/venus/athena），None 表示用渲染器的默认值。
+    """
     command = _render_command(['--in', str(state_path), '--out', str(out_path),
                                '--preset', preset, '--quality', str(int(quality))])
+    if theme:
+        command += ['--theme', str(theme)]
     if widgets:
         command += ['--widgets', ','.join(widgets)]
     if limit:

@@ -355,5 +355,60 @@ class GlassWorkflow(unittest.TestCase):
         self.assertFalse(self.api.snapshot()['state']['native'])
 
 
+    # --- 四套配色：对应官方四种颜色 -----------------------------------------
+
+    def test_theme_defaults_to_hades_and_rejects_unknown(self):
+        self.assertEqual(self.api.bootstrap()['config']['theme'], 'hades')
+        names = [t['id'] for t in self.api.bootstrap()['registry']['themes']]
+        self.assertEqual(names, ['hades', 'selene', 'venus', 'athena'])
+        for name in names:
+            self.assertTrue(self.api.configure({'widgets': ['cpu'], 'theme': name})['ok'], name)
+            self.assertEqual(self.api._config['theme'], name)
+        # 真正错的名字要拒绝；大小写和空格只是写法差异，归一化后应照常接受。
+        for bad in ('pink', 'gray', 'hades2', 5, True):
+            self.assertFalse(self.api.configure({'widgets': ['cpu'], 'theme': bad})['ok'], bad)
+        # 大小写、首尾空格和空串只是写法差异，归一化后应当照常接受（空串 = 退回深色）。
+        for loose in ('HADES', ' Athena ', 'venus ', ''):
+            self.assertTrue(self.api.configure({'widgets': ['cpu'], 'theme': loose})['ok'], loose)
+
+    def test_a_saved_config_without_a_theme_falls_back_instead_of_breaking(self):
+        """旧 settings.json 没有 theme 键，升级后必须还能打开，退回深色。"""
+        (self.api._dir / 'settings.json').write_text(
+            '{"widgets": ["cpu"], "interval": 5}', encoding='utf-8')
+        other = Api(self.temp.name, self.core, sampler=self.sampler,
+                    sources=Mock(read=Mock(return_value={})))
+        self.assertEqual(other.bootstrap()['config']['theme'], 'hades')
+        self.assertEqual(other.bootstrap()['config']['widgets'], ['cpu'])
+
+    def test_two_themes_produce_different_pixels_without_touching_usb(self):
+        ids = ['clock_big', 'cpu', 'mem', 'temp', 'battery']
+        self.assertTrue(self.api.configure({'widgets': ids})['ok'])
+        state = {'clock': '12:34:56', 'cpu_load': 20, 'mem_pct': 50, 'temp_c': 45}
+        shots = {}
+        for name in ('hades', 'selene', 'venus', 'athena'):
+            data, img = self.api._renderer.render(state, widgets=ids, theme=name)
+            self.assertEqual(img.size, (480, 360))
+            self.assertFalse(data.startswith(b'\xff\xc2'))
+            shots[name] = data
+        self.assertEqual(len(set(shots.values())), 4, '四套配色必须渲染出四份不同的画面')
+        # 浅色主题的左上角必须比深色主题亮：这是「银/白」和「黑/灰」最直接的差别。
+        def corner(name):
+            _, img = self.api._renderer.render(state, widgets=ids, theme=name)
+            return sum(img.convert('RGB').getpixel((4, 4)))
+        self.assertGreater(corner('venus'), corner('hades'))
+        self.assertGreater(corner('athena'), corner('selene'))
+        self.core.node_run.assert_not_called()
+
+    def test_the_chosen_theme_reaches_the_preview_frames(self):
+        """配色必须真的进到发出去的 JPEG，而不是只存在配置里。"""
+        self.assertTrue(self.api.configure({'widgets': ['cpu'], 'theme': 'venus'})['ok'])
+        self.api.preview()
+        self.wait()
+        self.assertEqual(len(self.api.snapshot()['previews']), 1)
+        _, light = self.api._renderer.render({}, widgets=['cpu'], theme='venus')
+        self.assertGreater(sum(light.convert('RGB').getpixel((4, 4)), 0), 600)
+        self.core.node_run.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

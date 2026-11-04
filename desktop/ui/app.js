@@ -17,6 +17,7 @@ function renderList() { const list = $('widget-list'); list.replaceChildren(); $
   config.widgets.forEach((id,i) => { const w = registry.widgets.find(x=>x.id===id); const row = el('li','widget-row'); row.append(el('span','widget-symbol',symbols[id]||'◇')); const title = el('span','widget-name',w.label); title.append(el('small','',w.group)); row.append(title); const actions = el('div','row-actions');
     for(const [text,label,offset] of [['↑','上移',-1],['↓','下移',1],['×','移除',0]]) { const b = el('button','icon-button',text); b.setAttribute('aria-label',`${label}${w.label}`); b.disabled = !!state.busy || (offset!==0 && (i+offset<0 || i+offset>=config.widgets.length)); b.addEventListener('click',async()=>{ const next=[...config.widgets]; if(offset) [next[i],next[i+offset]]=[next[i+offset],next[i]]; else next.splice(i,1); await save({...config,widgets:next}); }); actions.append(b); } row.append(actions); list.append(row); });
   $('preset').value=Object.keys(registry.presets).find(k=>JSON.stringify(registry.presets[k])===JSON.stringify(config.widgets))||'custom';
+  paintThemes(false);
   $('interval').value = config.interval; $('current-city').textContent=config.weather?.label||'尚未设置城市'; updatePreview(); }
 async function save(next) { if(pending || state.busy) return; pending = true; const result = await call('configure',next); pending = false; if(!result.ok) { toast(result.message||'配置未保存。'); return; } config=result.config; $('preset').value='custom'; previews=[]; page=0; renderList(); renderCatalog(); await refreshPreview(); }
 function renderCatalog() { const root=$('catalog-list'), search=$('search').value.trim().toLowerCase(); root.replaceChildren(); let count=0;
@@ -36,6 +37,7 @@ function paint() { const busy=!!state.busy; $('connection-label').textContent = 
   $('pin-page').setAttribute('aria-pressed',String(displayPage===page));
   if($('catalog').open) $('catalog-list').querySelectorAll('button').forEach(b=>{b.disabled=busy||b.textContent==='已添加';});
   paintNative(busy);
+  paintThemes(busy);
 }
 let polling=false;
 async function poll() { if(!ready || polling) return; polling=true; try { const r=await api.snapshot(revision); state=r.state; displayPage=r.displayPage??null; if(r.text) nativeText=r.text; if(r.previews) { previews=r.previews; revision=r.revision; updatePreview(); } paint(); } catch(e) { $('status-title').textContent='连接程序失败'; $('status-message').textContent='请关闭窗口后重新打开程序。'; } finally { polling=false; } }
@@ -88,6 +90,15 @@ function paintNative(busy) {
   $('native-off').textContent = nativePages().length ? '关闭文字组件' : '文字组件已关闭';
 }
 async function refreshNative() { const r = await call('native_preview'); if(!r.ok) toast(r.message || '未生成文字画面'); await poll(); }
+function paintThemes(busy) { const root=$('theme-chips'); const list=(registry&&registry.themes)||[]; const current=(config&&config.theme)||'hades';
+  Array.from(root.children).forEach(b=>{ if(!list.some(t=>t.id===b.dataset.theme)) root.removeChild(b); });
+  for(const t of list) { let b=Array.from(root.children).find(x=>x.dataset.theme===t.id);
+    if(!b) { b=el('button','theme-chip'); b.type='button'; b.dataset.theme=t.id; b.setAttribute('role','radio');
+      const sw=el('span','swatch'); b.append(sw); b.append(el('span','',t.label)); b.onclick=async()=>{ if(busy||state.busy||config.theme===t.id) return; await save({...config,theme:t.id}); await refreshPreview(); };
+      root.append(b); }
+    b.querySelector('.swatch').style.background=`linear-gradient(135deg,${t.swatch||'#222'} 0%,${t.swatch2||t.swatch||'#888'} 100%)`;
+    b.disabled=busy||!!state.busy; b.setAttribute('aria-checked', t.id===current?'true':'false'); } }
+
 async function boot(bridge) { if(ready) return; api=bridge; const data=await api.bootstrap(); registry=data.registry; config=data.config; if(data.native) nativeInfo={...nativeInfo,...data.native}; ready=true; $('version').textContent=`v${data.version}`; $('backup-path').textContent=data.backupDirectory; renderList(); renderCatalog(); await poll(); setInterval(poll,700); }
 $('tab-fullscreen').onclick=()=>showTab('fullscreen'); $('tab-widgets').onclick=()=>showTab('widgets');
 $('connect').onclick=async()=>{const r=await call('connect');if(!r.ok)toast(r.message);await poll();};

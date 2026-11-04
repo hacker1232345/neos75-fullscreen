@@ -53,20 +53,88 @@ W, H = 480, 360
 MARGIN = 6
 GAP = 4
 
-# 配色（深色底，高对比）
-BG = (12, 13, 18)
-CARD = (26, 29, 38)
-CARD_HI = (34, 38, 50)
-TRACK = (44, 48, 60)
-LINE = (40, 44, 56)
-TXT = (236, 239, 245)
-DIM = (130, 140, 158)
-FAINT = (78, 86, 102)
-ACCENT = (94, 200, 255)
-GOOD = (86, 214, 139)
-WARN = (245, 191, 79)
-BAD = (240, 92, 92)
-NA = (96, 104, 120)
+# ── 主题（对应官方四种配色）────────────────────────────────────
+# Venus  银 · Selene 灰 · Hades 黑 · Athena 白
+# 键名固定，绘制代码只认这些全局名，apply_theme() 负责整体覆盖。
+THEMES = {
+    # 黑 —— 现有深色主题，冷蓝强调
+    "hades": {
+        "label": "Hades 黑",
+        "blurb": "深黑底 + 冷蓝强调，原版深色",
+        "light": False,
+        "BG": (12, 13, 18), "CARD": (26, 29, 38), "CARD_HI": (34, 38, 50),
+        "TRACK": (44, 48, 60), "LINE": (40, 44, 56),
+        "TXT": (236, 239, 245), "DIM": (130, 140, 158), "FAINT": (78, 86, 102),
+        "ACCENT": (94, 200, 255), "GOOD": (86, 214, 139),
+        "WARN": (245, 191, 79), "BAD": (240, 92, 92), "NA": (96, 104, 120),
+        "TOPLINE": (24, 28, 38), "WATERMARK": (46, 52, 66),
+    },
+    # 银 —— 拉丝银底 + 香槟铜强调
+    "venus": {
+        "label": "Venus 银",
+        "blurb": "银白底 + 香槟铜强调",
+        "light": True,
+        "BG": (228, 229, 232), "CARD": (243, 244, 246), "CARD_HI": (252, 252, 253),
+        "TRACK": (203, 206, 211), "LINE": (211, 214, 219),
+        "TXT": (30, 32, 36), "DIM": (94, 99, 108), "FAINT": (152, 157, 166),
+        "ACCENT": (172, 120, 58), "GOOD": (34, 138, 84),
+        "WARN": (192, 132, 24), "BAD": (192, 58, 56), "NA": (138, 143, 150),
+        "TOPLINE": (208, 211, 216), "WATERMARK": (194, 198, 204),
+    },
+    # 灰 —— 石墨灰底 + 月光银蓝强调
+    "selene": {
+        "label": "Selene 灰",
+        "blurb": "石墨灰底 + 月光银蓝强调",
+        "light": False,
+        "BG": (28, 30, 33), "CARD": (40, 43, 47), "CARD_HI": (50, 54, 59),
+        "TRACK": (58, 62, 68), "LINE": (52, 56, 62),
+        "TXT": (232, 235, 238), "DIM": (146, 152, 160), "FAINT": (96, 102, 110),
+        "ACCENT": (168, 196, 224), "GOOD": (120, 200, 150),
+        "WARN": (230, 186, 110), "BAD": (226, 110, 106), "NA": (108, 114, 122),
+        "TOPLINE": (38, 41, 45), "WATERMARK": (72, 78, 86),
+    },
+    # 白 —— 暖象牙底 + 墨色文字 + 柔金强调
+    "athena": {
+        "label": "Athena 白",
+        "blurb": "象牙白底 + 墨色文字 + 柔金强调",
+        "light": True,
+        "BG": (245, 243, 239), "CARD": (254, 253, 250), "CARD_HI": (255, 255, 254),
+        "TRACK": (224, 220, 212), "LINE": (229, 225, 217),
+        "TXT": (36, 32, 28), "DIM": (110, 104, 94), "FAINT": (170, 164, 154),
+        "ACCENT": (176, 136, 56), "GOOD": (52, 138, 82),
+        "WARN": (194, 138, 28), "BAD": (188, 64, 58), "NA": (148, 142, 132),
+        "TOPLINE": (234, 230, 222), "WATERMARK": (204, 198, 188),
+    },
+}
+
+THEME_NAMES = ("hades", "selene", "venus", "athena")
+THEME = "hades"
+
+# 下面这些全局名会被 apply_theme() 按主题覆盖，绘制函数全部引用它们
+BG = CARD = CARD_HI = TRACK = LINE = None
+TXT = DIM = FAINT = ACCENT = GOOD = WARN = BAD = NA = None
+TOPLINE = WATERMARK = None
+LIGHT = False
+
+
+def apply_theme(name, _globals=None):
+    """把主题色装进模块全局。名字不认识就退回 hades。"""
+    global THEME, BG, CARD, CARD_HI, TRACK, LINE, TXT, DIM, FAINT
+    global ACCENT, GOOD, WARN, BAD, NA, TOPLINE, WATERMARK, LIGHT
+    key = str(name or "hades").strip().lower()
+    if key not in THEMES:
+        key = "hades"
+    t = THEMES[key]
+    THEME = key
+    for field in ("BG", "CARD", "CARD_HI", "TRACK", "LINE", "TXT", "DIM",
+                  "FAINT", "ACCENT", "GOOD", "WARN", "BAD", "NA",
+                  "TOPLINE", "WATERMARK"):
+        globals()[field] = t[field]
+    LIGHT = bool(t["light"])
+    return key
+
+
+apply_theme("hades")
 
 # 字体：按平台探测。取不到就退回 Pillow 内置字体（中文会变方块，但不崩）。
 # Windows 用微软雅黑/Consolas；macOS 用苹方/Helvetica；Linux 用 Noto/DejaVu。
@@ -188,7 +256,9 @@ def _fs(h, frac, lo, hi):
 
 
 # ── 通用绘制工具 ──────────────────────────────────────────────────
-def card(d, b, fill=CARD):
+def card(d, b, fill=None):
+    if fill is None:
+        fill = CARD
     d.rounded_rectangle([b["x"], b["y"], b["x"] + b["w"] - 1, b["y"] + b["h"] - 1], radius=7, fill=fill)
 
 
@@ -197,7 +267,9 @@ def cap(d, b, text):
     d.text((b["x"] + 8, b["y"] + 6), str(text), font=F(_fs(b["h"], 0.17, 9, 15), "bd", text), fill=DIM)
 
 
-def bar(d, x, y, w, h, pct, color, track=TRACK):
+def bar(d, x, y, w, h, pct, color, track=None):
+    if track is None:
+        track = TRACK
     pct = 0.0 if pct is None else max(0.0, min(100.0, float(pct)))
     h = max(4, int(h))
     r = h // 2
@@ -243,7 +315,9 @@ def txt(v, dash="n/a"):
     return s if s != "" else dash
 
 
-def put(d, xy, s, size, kind="mono", fill=TXT, anchor=None):
+def put(d, xy, s, size, kind="mono", fill=None, anchor=None):
+    if fill is None:
+        fill = TXT
     d.text(xy, str(s), font=F(size, kind, s), fill=fill, anchor=anchor)
 
 
@@ -272,7 +346,7 @@ def fitw(s, maxw, size, kind="mono", lo=8):
     return "", int(lo)
 
 
-def _frame(d, b, label=None, fill=CARD):
+def _frame(d, b, label=None, fill=None):
     """画卡片 + 左上角标签，返回内容区 (cx, cy, cw, ch)。
 
     cy 从标签下沿之后才开始，数值一律限制在内容区内，
@@ -289,7 +363,7 @@ def _frame(d, b, label=None, fill=CARD):
     return cx, cy, cw, ch
 
 
-def _metric(d, b, label, value, unit, color, sub=None, pct=None, fill=CARD):
+def _metric(d, b, label, value, unit, color, sub=None, pct=None, fill=None):
     """标准指标卡：标签 + 大数值 + 单位 + 可选副行 + 可选进度条。
 
     纵向预算全部按内容区高度 ch 分配，因此任意格子高度都不会重叠或越出卡片。
@@ -607,7 +681,9 @@ def draw_history_cpu(d, b, st, ctx):
 
 
 
-def _text_rows(d, b, title, rows, color=TXT):
+def _text_rows(d, b, title, rows, color=None):
+    if color is None:
+        color = TXT
     cx, cy, cw, ch = _frame(d, b, title)
     step = ch / max(1, len(rows))
     for index, row in enumerate(rows):
@@ -692,18 +768,24 @@ def append_history(state_dir, st):
 
 
 # ── 渲染主流程 ────────────────────────────────────────────────────
-def render(st, widgets=None, preset="default", quality=72, limit=None, history=None):
-    """返回 (jpeg_bytes, PIL.Image)。st 里缺失/null 的字段一律画 n/a，不崩。"""
+def render(st, widgets=None, preset="default", quality=72, limit=None, history=None,
+           theme=None):
+    """返回 (jpeg_bytes, PIL.Image)。st 里缺失/null 的字段一律画 n/a，不崩。
+
+    theme 决定四套配色之一（hades/selene/venus/athena）；None 表示沿用当前全局。
+    """
     if not isinstance(st, dict):
         st = {}
+    if theme:
+        apply_theme(theme)
     ids = resolve_widgets(widgets, preset)
     boxes, info = layout(ids)
 
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
     # 顶部一条极细的强调线，避免整体过暗
-    d.rectangle([0, 0, W, 2], fill=(24, 28, 38))
-    d.text((W - 8, H - 4), "480x360", font=F(10, "mono"), fill=(46, 52, 66), anchor="rs")
+    d.rectangle([0, 0, W, 2], fill=TOPLINE)
+    d.text((W - 8, H - 4), "480x360", font=F(10, "mono"), fill=WATERMARK, anchor="rs")
 
     ctx = {"history": history or [], "info": info}
     for b in boxes:
@@ -744,6 +826,14 @@ def registry_json():
     return {
         "canvas": {"width": W, "height": H, "format": "baseline-jpeg"},
         "presets": PRESETS,
+        "themes": [
+            {"id": k, "label": THEMES[k]["label"], "blurb": THEMES[k]["blurb"],
+             "light": THEMES[k]["light"],
+             "swatch": "rgb(%d,%d,%d)" % THEMES[k]["BG"],
+             "swatch2": "rgb(%d,%d,%d)" % THEMES[k]["ACCENT"]}
+            for k in THEME_NAMES
+        ],
+        "theme": THEME,
         "groups": sorted({w["group"] for w in REGISTRY}),
         "widgets": [
             {
@@ -770,11 +860,16 @@ def main(argv=None):
     ap.add_argument("--preset", default="default", choices=sorted(PRESETS))
     ap.add_argument("--quality", type=int, default=72)
     ap.add_argument("--limit", type=int, default=None, help="字节上限，超出则二分降质量")
+    ap.add_argument("--theme", default=None, choices=list(THEME_NAMES),
+                    help="四套配色：hades(黑) / selene(灰) / venus(银) / athena(白)")
     ap.add_argument("--preview", default=None, help="另存一张 PNG 预览")
     ap.add_argument("--state-dir", dest="state_dir", default=None, help="历史采样目录（供 history_cpu）")
     ap.add_argument("--list", action="store_true", help="打印部件注册表 JSON 后退出")
     ap.add_argument("--layout", action="store_true", help="打印布局盒子 JSON 后退出")
     a = ap.parse_args(argv)
+
+    if a.theme:
+        apply_theme(a.theme)
 
     if a.list:
         print(json.dumps(registry_json(), ensure_ascii=False, indent=2))
@@ -803,7 +898,7 @@ def main(argv=None):
 
     try:
         data, img = render(st, a.widgets.split(",") if a.widgets else None, a.preset,
-                           a.quality, a.limit, hist)
+                           a.quality, a.limit, hist, a.theme)
     except UnknownWidget as exc:
         sys.stderr.write("错误: %s\n" % exc)
         return 3
