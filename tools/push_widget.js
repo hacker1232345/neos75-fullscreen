@@ -33,6 +33,7 @@ function parseMask(text) {
 async function loop(emit) {
   const HID = require('node-hid');
   const dev = w.openDevice(HID);
+  const stream = w.rowStream(dev);
   const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
   let closed = false;
   const shutdown = () => {
@@ -44,27 +45,29 @@ async function loop(emit) {
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
-  dev.on('error', e => emit({ error: e.message || String(e) }));
+  dev.on('error', () => stream.invalidate());
   for await (const line of lines) {
     const text = line.trim();
     if (!text) continue;
     let payload;
     try {
       payload = JSON.parse(text);
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw Error('需要对象');
     } catch (e) {
       emit({ error: `帧格式不是 JSON：${e.message}` });
       continue;
     }
     if (payload.mask !== undefined) {
       try {
-        emit({ mask: await w.setMask(dev, Number(payload.mask)) });
+        emit({ mask: await stream.mask(Number(payload.mask)) });
       } catch (e) {
         emit({ error: e.message || String(e) });
+        continue;
       }
     }
     if (payload.rows) {
       try {
-        emit({ frame: await w.sendRows(dev, payload.rows) });
+        emit({ frame: await stream.send(payload.rows) });
       } catch (e) {
         // A rejected frame must not end the session: the next one may succeed.
         emit({ error: e.message || String(e) });

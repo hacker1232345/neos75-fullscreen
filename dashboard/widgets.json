@@ -208,5 +208,45 @@
     "minWidth": 170,
     "minHeight": 72,
     "draw": "draw_net_pulse"
+  },
+  {
+    "id": "focus_timer",
+    "label": "专注倒计时",
+    "desc": "用桌面程序启动 1–90 分钟倒计时，显示剩余时间和结束状态",
+    "group": "效率",
+    "default": false,
+    "minWidth": 265,
+    "minHeight": 116,
+    "draw": "draw_focus_timer"
+  },
+  {
+    "id": "clock_utc",
+    "label": "世界时间 UTC",
+    "desc": "协调世界时，适合跨时区对表；按分钟刷新",
+    "group": "时间",
+    "default": false,
+    "minWidth": 150,
+    "minHeight": 82,
+    "draw": "draw_clock_utc"
+  },
+  {
+    "id": "day_progress",
+    "label": "今日进度",
+    "desc": "根据本地时间计算当天经过的比例，按分钟更新",
+    "group": "效率",
+    "default": false,
+    "minWidth": 152,
+    "minHeight": 78,
+    "draw": "draw_day_progress"
+  },
+  {
+    "id": "mem_available",
+    "label": "可用内存",
+    "desc": "电脑当前可用的物理内存，包含可回收缓存；无法读取时显示 n/a",
+    "group": "性能",
+    "default": false,
+    "minWidth": 158,
+    "minHeight": 78,
+    "draw": "draw_mem_available"
   }
 ]

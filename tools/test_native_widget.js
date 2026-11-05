@@ -1,6 +1,7 @@
 'use strict';
 // Offline checks for the native widget channel. No USB device is opened.
 const assert = require('assert');
+const { EventEmitter } = require('events');
 const w = require('./native_widget.js');
 
 let pass = 0;
@@ -39,7 +40,8 @@ check('row frame encodes index, length and ASCII payload', () => {
 
 check('row frame rejects non-printable and oversized text', () => {
   assert.throws(() => w.rowPacket(0, 'a\tb'), /printable ASCII/);
-  assert.throws(() => w.rowPacket(0, 'x'.repeat(48)), /printable ASCII/);
+  assert.doesNotThrow(() => w.rowPacket(0, 'x'.repeat(31)));
+  assert.throws(() => w.rowPacket(0, 'x'.repeat(32)), /printable ASCII/);
   assert.throws(() => w.rowPacket(4, 'ok'), /row must be/);
 });
 
@@ -99,4 +101,46 @@ check('status text covers every documented status', () => {
   assert.ok(w.explain(0x99).includes('0x99'));
 });
 
-console.log(`${pass} groups passed`);
+async function streamChecks() {
+  const dev = new EventEmitter();
+  const writes = [];
+  let status = 0xfe, time = 0;
+  dev.write = bytes => {
+    writes.push(bytes[4] === 4 ? 'probe' : bytes[9]);
+    queueMicrotask(() => dev.emit('data', ack(status)));
+  };
+  const stream = w.rowStream(dev, () => time);
+  const frame = ['clock', 'cpu', 'mem', 'disk'];
+  await stream.mask(16);
+  const take = () => writes.splice(0);
+  assert.deepEqual(take(), [127]);
+  assert.equal((await stream.send(frame)).reports, 5);
+  assert.deepEqual(take(), ['probe', 0, 1, 2, 3]);
+  time = 2000;
+  assert.equal((await stream.send(frame)).written, 0);
+  assert.deepEqual(take(), ['probe']);
+  const changed = ['clock', 'cpu', '', 'disk'];
+  assert.equal((await stream.send(changed)).reports, 2);
+  assert.deepEqual(take(), ['probe', 2]);
+  time = 9000;
+  await stream.send(changed);
+  assert.deepEqual(take(), ['probe', 0, 1, 2, 3]);
+  status = 0xfd;
+  await assert.rejects(stream.send(changed), /目标页/);
+  assert.deepEqual(take(), ['probe']);
+  status = 0xfe;
+  await stream.send(changed);
+  assert.deepEqual(take(), ['probe', 0, 1, 2, 3]);
+  await stream.mask(18);
+  take();
+  await stream.send(changed);
+  assert.deepEqual(take(), ['probe', 0, 1, 2, 3]);
+  await stream.send(changed);
+  assert.deepEqual(take(), ['probe', 0, 1, 2, 3]);
+  await assert.rejects(stream.send(['clock', 'cpu', 'x'.repeat(32), 'disk']), /ASCII/);
+  assert.deepEqual(take(), []);
+}
+streamChecks().then(() => {
+  console.log(`  ok  single-page delta, refresh, invalidation, multi-page fallback`);
+  console.log(`${pass + 1} groups passed`);
+}, error => { console.error(error); process.exitCode = 1; });

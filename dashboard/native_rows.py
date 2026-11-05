@@ -6,14 +6,15 @@ is the wire format: the firmware stores 4 rows x 32 bytes of printable ASCII
 (0x20..0x7e), so this module speaks only ASCII and never invents a value that the
 sample does not contain - a missing sensor becomes "n/a".
 """
+import datetime as dt
 import json
 import math
 import re
 from pathlib import Path
 
 MAX_ROWS = 4
-MAX_TEXT = 47
-ROW_BYTES = 32          # what the firmware stores per row
+ROW_BYTES = 32          # older/portable firmware has 32 bytes per row
+MAX_TEXT = ROW_BYTES - 1
 PRINTABLE = re.compile(r'[^\x20-\x7e]+')
 
 registry_path = Path(__file__).resolve().parent / 'widgets.json'
@@ -21,7 +22,8 @@ registry_path = Path(__file__).resolve().parent / 'widgets.json'
 # Widgets the 4x32-byte ASCII channel can carry. A line chart cannot: it is drawn,
 # not written as text. Keep this list next to `tokens` so the two never drift.
 TEXT_WIDGETS = ('clock_big', 'date', 'cpu', 'mem', 'gpu', 'temp', 'top_proc', 'disk',
-                'net', 'ip', 'host', 'battery', 'volume', 'weather', 'codex', 'uptime')
+                'net', 'ip', 'host', 'battery', 'volume', 'weather', 'codex', 'uptime',
+                'clock_utc', 'day_progress', 'focus_timer', 'mem_available')
 GRAPH_WIDGETS = ('history_cpu',)
 
 
@@ -47,6 +49,22 @@ def tokens(state, widget_id):
     """
     w = state.get('weather') or {}
     c = state.get('codex') or {}
+    if widget_id == 'clock_utc':
+        return [f'UTC {state.get("clock_utc") or "n/a"}']
+    if widget_id == 'day_progress':
+        try:
+            now = dt.time.fromisoformat(state.get('clock'))
+            return [f'DAY {(now.hour * 60 + now.minute) * 100 // 1440}%']
+        except (TypeError, ValueError):
+            return ['DAY n/a']
+    if widget_id == 'focus_timer':
+        remaining = state.get('focus_remaining')
+        if number(remaining) is None or remaining < 0:
+            return ['FOCUS idle']
+        minutes, seconds = divmod(int(remaining), 60)
+        return [f'FOCUS {minutes:02d}:{seconds:02d}']
+    if widget_id == 'mem_available':
+        return [f'RAM FREE {number(state.get("mem_available_gb"), 1, "G") or "n/a"}']
     if widget_id == 'clock_big':
         return [state.get('clock')]
     if widget_id == 'date':
@@ -99,7 +117,7 @@ def tokens(state, widget_id):
 
 
 def rows_from_state(state, widgets, registry=None):
-    """Pack the chosen widgets into at most four 47-character ASCII rows.
+    """Pack the chosen widgets into at most four 31-character ASCII rows.
 
     Returns (rows, omitted) where `omitted` names widgets the text channel cannot show
     and any widgets that did not fit, so the caller can say so instead of silently

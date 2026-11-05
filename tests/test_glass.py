@@ -181,6 +181,19 @@ class GlassWorkflow(unittest.TestCase):
         self.assertFalse(self.api.snapshot()['state']['stream'])
         self.assertEqual(self.core.dash.return_value.push_once.call_count, 1)
 
+    def test_stream_skips_byte_identical_jpeg_and_sends_the_next_change(self):
+        self.api._make_frames = Mock(side_effect=[[b'first'], [b'first'], [b'changed']])
+        uploaded = []
+        self.core.dash.return_value.push_once.side_effect = (
+            lambda mode, image, **_: uploaded.append(image.read_bytes()))
+        def wait(_interval):
+            if self.api._make_frames.call_count == 3:
+                self.api._stop.set()
+        self.api._stop.wait = wait
+        self.assertTrue(self.api.start()['ok'])
+        self.wait()
+        self.assertEqual(uploaded, [b'first', b'changed'])
+
     def test_restore_checks_unmodified_regions_before_writing(self):
         self.api.patch(True)
         self.wait()
@@ -360,7 +373,8 @@ class GlassWorkflow(unittest.TestCase):
     def test_theme_defaults_to_hades_and_rejects_unknown(self):
         self.assertEqual(self.api.bootstrap()['config']['theme'], 'hades')
         names = [t['id'] for t in self.api.bootstrap()['registry']['themes']]
-        self.assertEqual(names, ['hades', 'selene', 'venus', 'athena'])
+        self.assertEqual(names, ['hades', 'selene', 'venus', 'athena',
+                                 'abyss', 'porcelain', 'amethyst', 'glacier'])
         for name in names:
             self.assertTrue(self.api.configure({'widgets': ['cpu'], 'theme': name})['ok'], name)
             self.assertEqual(self.api._config['theme'], name)
@@ -385,18 +399,34 @@ class GlassWorkflow(unittest.TestCase):
         self.assertTrue(self.api.configure({'widgets': ids})['ok'])
         state = {'clock': '12:34:56', 'cpu_load': 20, 'mem_pct': 50, 'temp_c': 45}
         shots = {}
-        for name in ('hades', 'selene', 'venus', 'athena'):
+        for theme in self.api.bootstrap()['registry']['themes']:
+            name = theme['id']
             data, img = self.api._renderer.render(state, widgets=ids, theme=name)
             self.assertEqual(img.size, (480, 360))
             self.assertFalse(data.startswith(b'\xff\xc2'))
             shots[name] = data
-        self.assertEqual(len(set(shots.values())), 4, '四套配色必须渲染出四份不同的画面')
+        self.assertEqual(len(set(shots.values())), 8, '八套配色必须渲染出八份不同的画面')
         # 浅色主题的左上角必须比深色主题亮：这是「银/白」和「黑/灰」最直接的差别。
         def corner(name):
             _, img = self.api._renderer.render(state, widgets=ids, theme=name)
             return sum(img.convert('RGB').getpixel((4, 4)))
         self.assertGreater(corner('venus'), corner('hades'))
         self.assertGreater(corner('athena'), corner('selene'))
+        self.assertGreater(corner('porcelain'), corner('abyss'))
+        self.assertGreater(corner('glacier'), corner('amethyst'))
+        self.core.node_run.assert_not_called()
+
+    def test_focus_timer_uses_monotonic_time_and_never_calls_device(self):
+        from unittest.mock import patch
+        with patch('glass.time.monotonic', return_value=10) as clock:
+            self.assertFalse(self.api.set_focus(True)['ok'])
+            self.assertFalse(self.api.set_focus(91)['ok'])
+            self.assertEqual(self.api.set_focus(1)['focus'], 60)
+            clock.return_value = 35.6
+            self.assertEqual(self.api._read_state()['focus_remaining'], 35)
+            clock.return_value = 200
+            self.assertEqual(self.api.snapshot()['focus'], 0)
+            self.assertIsNone(self.api.set_focus()['focus'])
         self.core.node_run.assert_not_called()
 
     def test_the_chosen_theme_reaches_the_preview_frames(self):

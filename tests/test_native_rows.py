@@ -61,6 +61,20 @@ class RowPacking(unittest.TestCase):
         rows, _ = rows_module.rows_from_state({}, ['cpu'])
         self.assertIn('CPU n/a', ' '.join(rows))
 
+    def test_focus_utc_and_host_values_fit_and_hold_missing_states(self):
+        widgets = ['focus_timer', 'clock_utc', 'day_progress', 'mem_available']
+        state = dict(clock='23:59:59', clock_utc='15:59', focus_remaining=301, mem_available_gb=6.25)
+        rows, omitted = rows_module.rows_from_state(state, widgets)
+        self.assertFalse(omitted)
+        self.assertIn('FOCUS 05:01', ' '.join(rows))
+        self.assertIn('UTC 15:59', ' '.join(rows))
+        self.assertIn('DAY 99%', ' '.join(rows))
+        self.assertIn('RAM FREE 6.2G', ' '.join(rows))
+        self.assertTrue(all(len(line.encode('ascii')) <= 31 for line in rows))
+        missing, _ = rows_module.rows_from_state({}, widgets)
+        self.assertIn('FOCUS idle', ' '.join(missing))
+        self.assertIn('RAM FREE n/a', ' '.join(missing))
+
     def test_duplicate_widgets_are_counted_once(self):
         rows, _ = rows_module.rows_from_state(STATE, ['cpu', 'cpu'])
         self.assertEqual(sum(row.count('CPU') for row in rows), 1)

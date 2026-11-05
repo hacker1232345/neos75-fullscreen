@@ -535,6 +535,7 @@ while ($true) {
     # ── 组 JSON 行（key 顺序与契约一致） ──────────────────────
     $line = '{' +
         '"clock":' + (J $now.ToString('HH:mm:ss', $INV)) + ',' +
+        '"clock_utc":' + (J $now.ToUniversalTime().ToString('HH:mm', $INV)) + ',' +
         '"date":' + (J $now.ToString('yyyy-MM-dd', $INV)) + ',' +
         '"uptime":' + (J $uptime) + ',' +
         '"cpu_load":' + (N $cpuLoad 1) + ',' +
@@ -542,6 +543,7 @@ while ($true) {
         '"mem_pct":' + (N $memPct 1) + ',' +
         '"mem_used_gb":' + (N $memUsedGb 1) + ',' +
         '"mem_total_gb":' + (N $memTotalGb 1) + ',' +
+        '"mem_available_gb":' + (N ($(if ($null -ne $availMb) { $availMb / 1024.0 } else { $null })) 1) + ',' +
         '"temp_c":' + (N $tempC 1) + ',' +
         '"gpu_pct":' + (N $gpuPct 0) + ',' +
         '"disk_free_gb":' + (N $diskFree 1) + ',' +

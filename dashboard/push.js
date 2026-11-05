@@ -65,7 +65,7 @@ const HID_PID = 0x0001;
 // ── 参数解析 ──────────────────────────────────────────────────────
 function parseArgs(argv) {
   const o = {
-    mode: null, file: null, widgets: null, preset: 'default',
+    mode: null, file: null, widgets: null, preset: 'default', theme: null,
     quality: 72, limit: 30000, interval: 3000, retries: 4,
     stateDir: path.join(os.tmpdir(), 'neos75-dashboard-state'),
     json: false, timeout: 1500,
@@ -75,6 +75,10 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === '--widgets') o.widgets = argv[++i];
     else if (a === '--preset') o.preset = argv[++i];
+    else if (a === '--theme') {
+      o.theme = argv[++i];
+      if (!o.theme || o.theme.startsWith('--')) throw new Error('--theme 需要皮肤 ID');
+    }
     else if (a === '--quality') o.quality = Number(argv[++i]);
     else if (a === '--limit') o.limit = Number(argv[++i]);
     else if (a === '--interval') o.interval = Number(argv[++i]);
@@ -298,6 +302,7 @@ function renderJpeg(state, o) {
   const pyArgs = ['--in', '-', '--out', out,
     '--preset', o.preset, '--quality', String(o.quality), '--state-dir', o.stateDir];
   if (o.widgets) { pyArgs.push('--widgets', o.widgets); }
+  if (o.theme) { pyArgs.push('--theme', o.theme); }
   if (o.limit > 0) { pyArgs.push('--limit', String(o.limit)); }
 
   const { cmd, args } = rendererCommand(pyArgs);
@@ -510,6 +515,7 @@ async function cmdLoop(o) {
 
   let round = 0;
   let ok = 0, fail = 0;
+  let previous = null, lastSent = -Infinity;
   while (!stop) {
     const cyc0 = Date.now();
     let sampleMs = 0, renderMs = 0, pushMs = 0, framesN = 0, acksN = 0, kb = 0;
@@ -522,16 +528,21 @@ async function cmdLoop(o) {
       const { jpeg, ms } = renderJpeg(state, o);
       renderMs = ms;
       kb = +(jpeg.length / 1024).toFixed(1);
-      const r = await pushJpeg(jpeg, o);
+      const skipped = previous && jpeg.equals(previous) && performance.now() - lastSent < 30000;
+      const r = skipped
+        ? { pushMs: 0, frames: 0, acks: 0, attempts: 0, displayVerified: false }
+        : await pushJpeg(jpeg, o);
+      if (!skipped) { previous = jpeg; lastSent = performance.now(); }
       pushMs = r.pushMs; framesN = r.frames; acksN = r.acks;
       ok++;
       const cycleMs = Date.now() - cyc0;
       log(o, {
         event: 'loop', round: ++round, kb, frames: framesN, acks: acksN,
         sampleMs, renderMs, pushMs, cycleMs, attempts: r.attempts,
-        displayVerified: r.displayVerified, ok, fail,
+        displayVerified: r.displayVerified, skipped: Boolean(skipped), ok, fail,
       });
     } catch (e) {
+      previous = null;
       fail++;
       log(o, { event: 'error', round: ++round, error: e.message, sampleMs, renderMs, pushMs, ok, fail });
       if (s.closed) {
@@ -563,7 +574,7 @@ async function main(argv) {
       'node dashboard/push.js loop [--widgets ...] [--interval 3000] [--quality 72] [--limit 30000]',
       'node dashboard/push.js push <file.jpg>           推现成 JPEG',
       '',
-      '公共选项：--preset --widgets --quality --limit --state-dir --json --retries',
+      '公共选项：--preset --theme --widgets --quality --limit --state-dir --json --retries',
       '注意：原厂协议无最终 ACK，displayVerified 恒为 false，推完请看屏确认。',
     ].join('\n'));
     return 0;

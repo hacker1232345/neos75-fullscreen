@@ -15,7 +15,9 @@
 //               0xfc invalid frame or unknown page.
 const COMMAND = 0x3d;
 const MAX_ROWS = 4;
-const MAX_TEXT = 47;
+// Compatible with 32-byte firmware row buffers (one byte for NUL).
+const MAX_TEXT = 31;
+const FULL_REFRESH_MS = 8000;
 
 function checksum(body) {
   return (body.reduce((a, b) => a + b, 0) ^ 0xff) & 0xff;
@@ -113,16 +115,49 @@ async function request(dev, bytes) {
 
 async function probe(dev) { return request(dev, probePacket()); }
 
-async function sendRows(dev, rows) {
+async function sendRows(dev, rows, previous = null) {
   if (!Array.isArray(rows) || rows.length !== MAX_ROWS) throw Error('需要正好四行文字');
+  const reports = Array.from(rows, (text, row) => rowPacket(row, text));
   const caps = await probe(dev);
   if (!caps.ready) throw Error(explain(caps.status));
-  const reports = rows.map((text, row) => rowPacket(row, text));
-  for (const bytes of reports) {
-    const ack = await request(dev, bytes);
+  let written = 0;
+  for (let row = 0; row < MAX_ROWS; row++) {
+    if (previous && rows[row] === previous[row]) continue;
+    const ack = await request(dev, reports[row]);
     if (!ack.ready) throw Error(explain(ack.status));
+    written++;
   }
-  return { rows: MAX_ROWS, acknowledged: true, displayVerified: false };
+  return { rows: MAX_ROWS, written, reports: 1 + written, acknowledged: true, displayVerified: false };
+}
+
+function rowStream(dev, clock = () => performance.now()) {
+  // ACKs don't identify the active page. Only cache within a single acknowledged
+  // page mask, never between selected pages or after an error. Probe even on a
+  // steady frame; periodically send all rows before the firmware's 15s timeout.
+  let single = false, previous = null, lastFull = -Infinity;
+  const invalidate = () => { previous = null; lastFull = -Infinity; };
+  return {
+    invalidate,
+    async mask(value) {
+      invalidate();
+      single = false;
+      const result = await setMask(dev, value);
+      single = result.pages.length === 1;
+      return result;
+    },
+    async send(rows) {
+      const full = !single || !previous || clock() - lastFull >= FULL_REFRESH_MS;
+      try {
+        const result = await sendRows(dev, rows, full ? null : previous);
+        if (single) previous = rows.slice();
+        if (full) lastFull = clock();
+        return result;
+      } catch (error) {
+        invalidate();
+        throw error;
+      }
+    },
+  };
 }
 
 async function setMask(dev, mask) {
@@ -135,5 +170,5 @@ module.exports = {
   COMMAND, MAX_ROWS, MAX_TEXT,
   checksum, packet, probePacket, rowPacket, maskPacket,
   maskFromPages, pagesFromMask, parseAck, explain,
-  openDevice, exchange, request, probe, sendRows, setMask,
+  openDevice, exchange, request, probe, sendRows, setMask, rowStream,
 };

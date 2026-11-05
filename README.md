@@ -57,7 +57,7 @@ python dashboard/native_rows.py --list           # 哪些部件能写成文字
 
 - 每屏独立缓冲：六个页面可以各自显示不同内容。
 - 未选中的页面保持官方原样，图片和 GIF 不受影响。
-- 只支持 ASCII `0x20`–`0x7e`；中文会被替换成空格。四行、每行最多 47 字符。
+- 只支持 ASCII `0x20`–`0x7e`；中文会被替换成空格。四行、每行最多 31 字符（兼容 32 字节行缓冲）。
 - 应答 `FE` 接受 / `FD` 该页尚未初始化（翻过去就好）/ `FC` 无效帧。
 - 取不到的传感器写 `n/a`，不编造数字。
 - **默认一页都不开**：装上组件后页掩码是 `0`，六页全是原厂画面；要用哪一页自己勾。桌面程序里「关闭文字组件」= 把页选择清空再应用，本质就是写掩码 `0`（真机实测回 `FE`，随后 `probe` 变 `FD`）。
@@ -65,22 +65,23 @@ python dashboard/native_rows.py --list           # 哪些部件能写成文字
 
 ## 屏幕部件（可选显示）
 
-`dashboard/` 把电脑状态画成 480×360 baseline JPEG 推到屏幕上。21 个可选部件：
+`dashboard/` 把电脑状态画成 480×360 baseline JPEG 推到屏幕上。25 个可选部件：
 
 | 分组 | 部件 |
 | --- | --- |
-| 时间 | `clock_big` 超大时钟、`date` 日期、`calendar` 今天几号 + 第几周 |
-| 性能 | `cpu`、`mem`、`gpu`、`temp` 温度、`history_cpu` 折线、`top_proc` 最占进程 |
+| 时间 | `clock_big` 超大时钟、`date` 日期、`calendar` 今天几号 + 第几周、`clock_utc` 世界时间 |
+| 性能 | `cpu`、`mem`、`gpu`、`temp` 温度、`history_cpu` 折线、`top_proc` 最占进程、`mem_available` 可用物理内存 |
 | 存储 | `disk` 磁盘剩余 |
 | 网络 | `net` 上下行速率、`net_pulse` 网速条、`link` 连接方式 + 延迟 + 丢包、`ip` 地址 |
 | 系统 | `host` 主机名、`uptime` 运行时长 |
 | 电源 | `battery` 电池、`volume` 音量 |
+| 效率 | `focus_timer` 专注倒计时、`day_progress` 今日进度 |
 | 生活 / 工作 | `weather` 天气、`codex` Codex 状态、`playing` 正在播放 |
 
-预设：`minimal` / `default` / `full` / `performance` / `network` / `desk` / `media`，也可以任意勾选组合。
+预设：`minimal` / `default` / `full` / `performance` / `network` / `desk` / `media` / `studio` / `weather` / `codex`，也可以任意勾选组合。
 
 `desk` 是给「一直挂在屏幕上」用的：时间 + 正在播放 + 日历 + CPU/内存 + 连接 + 网速条 + 电池，
-八个组件一屏看完。`media` 是听歌时用的，歌名占半屏。
+八个组件一屏看完。`media` 是听歌时用的，歌名占半屏。`studio` 将专注计时、世界时间、今日进度和可用内存放在同一屏。
 
 「正在播放」读的是 Windows 的 SMTC（`dashboard/media_state.ps1`，每 2 秒一行 JSON）。
 它固定用 `powershell.exe`（5.1）：`Windows.Media.Control` 是 WinRT 组件，PowerShell 7 没有
@@ -115,10 +116,10 @@ node   tools/knob_flash.js flash  --target new.bin --yes # 备份→擦除→写
 - 「翻页」只有一个选项。原厂那段代码自带方向判断，同一份字节放到顺时针位就是下一屏、
   放到逆时针位就是上一屏——拆成「下一屏/上一屏」两个选项是假的。
 
-### 四套配色（对应官方四种颜色）
+### 八套配色与静态底图
 
 官方这台键盘有四种颜色：Venus 银 / Selene 灰 / Hades 黑 / Athena 白。渲染器把这四种都做成了主题，
-配色只是一套色板，布局与部件完全不变——换主题不会改变任何信息的排布。
+另有深海青、紫曜（深色）与暖瓷、冰湖（浅色）。换主题会重画预览并保存配置。
 
 ```sh
 python dashboard/render.py --in state.json --out a.jpg --theme hades    # 黑，原版深色
@@ -127,7 +128,7 @@ python dashboard/render.py --in state.json --out c.jpg --theme venus    # 银，
 python dashboard/render.py --in state.json --out d.jpg --theme athena   # 白，象牙底 + 墨字柔金
 ```
 
-桌面程序里在「屏幕预览」上方有一排配色按钮，点一下立刻重画预览，选中的配色会写进 `settings.json`，
+桌面程序在「屏幕预览」上方提供八套皮肤；选中的配色写进 `settings.json`，
 下次打开还是它。旧配置没有这一项时自动退回 Hades 黑，不会因为少了字段打不开。
 
 主题表的键名是固定的（`BG / CARD / CARD_HI / TRACK / LINE / TXT / DIM / FAINT / ACCENT / GOOD / WARN / BAD / NA / TOPLINE / WATERMARK`），
@@ -140,6 +141,9 @@ node   dashboard/push.js dry --preset full           # 离线构造传输计划�
 node   dashboard/push.js once  --widgets clock_big,cpu,mem,net
 node   dashboard/push.js loop  --preset default --interval 3000
 ```
+
+用「静态底图与实时文字」保存底图，在 A HUB 的自定义媒体页导入一次，然后选中该页启动原生文字同步。
+具体步骤、协议边界和验证记录见 [小屏工作台预览版](docs/widget-studio-preview.md)。
 
 采样走 `dashboard/live_state.ps1`（全 CIM，稳态约 0.62 秒/次，重项按相位分摊缓存）。渲染走 `dashboard/render.py`（Pillow，`progressive=False`，超字节上限时二分降质量）。推送走 `dashboard/push.js`，协议与 `wallpaper/screen_wallpaper.js` 一致。
 

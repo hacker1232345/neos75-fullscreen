@@ -42,3 +42,38 @@
 .knob-select { flex: 1; min-width: 0; height: 34px; padding: 0 10px; border-radius: 10px; border: 1px solid rgba(16, 24, 40, .14); background: #fff; color: #14181f; font-size: 13px; }
 .knob-select:disabled { opacity: .5; }
 .knob-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+/* Panel controls follow the square instrument frame on the keyboard. */
+.theme-row{display:block;margin:0 0 12px}
+.theme-row .theme-label{display:block;margin:0 0 6px;font-weight:650;color:#344255}
+.theme-chips{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;max-width:400px}
+.theme-chip{display:grid;grid-template-columns:17px minmax(0,1fr) auto;gap:7px;text-align:left;
+  padding:7px 8px;border:1px solid #c9d4e0;border-radius:7px;min-height:36px;background:#fcfdff;color:#22364b}
+.theme-chip .swatch{width:17px;height:17px;border-radius:4px;border:1px solid #65778a}
+.theme-name{min-width:0;overflow-wrap:anywhere}
+.theme-tone{font-size:10px;color:#495c70}
+.theme-chip[aria-checked="true"]{border-color:#1562aa;box-shadow:inset 3px 0 #1562aa;background:#eaf4fe}
+.theme-chip[aria-checked="true"] .theme-tone{color:#254d73}
+.theme-chip[aria-disabled="true"]{cursor:wait}
+.widget-layout .editor,.native-panel{border-radius:14px}
+.widget-row{border-radius:6px}
+.widget-row .widget-symbol{color:#155d82;background:#e7f1f7;border-radius:5px}
+.widget-row .widget-name{min-width:0;overflow-wrap:anywhere}
+.focus-tool{margin-top:12px;padding:11px 0 2px;border-top:1px solid #dbe4ef;font-size:12px}
+.focus-controls,.native-base-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:7px}
+.focus-controls input{width:68px;padding:8px;border:1px solid #c9d4e0;border-radius:6px;background:#fff;color:#172336;font:inherit}
+.focus-controls button,.native-base-actions button{padding:7px 11px;min-height:35px;font-size:12px}
+.native-base-actions label{font-size:12px;font-weight:650}
+#focus-left,.native-surface{font-variant-numeric:tabular-nums}
+#native-preview{--base:#0f141c;--line:#1a2330;--ink:#68ace1;position:relative;box-sizing:border-box;
+  width:min(100%,480px);aspect-ratio:4/3;margin:12px auto;display:grid;grid-template-rows:repeat(4,minmax(0,1fr));
+  min-height:0;gap:2%;padding:clamp(20px,3vw,29px) 10px clamp(29px,4vw,49px);background:var(--base);border-radius:9px;align-items:stretch}
+#native-preview[data-skin=tide]{--base:#0d2125;--line:#143237;--ink:#76dcbf}
+#native-preview::before,#native-preview::after{position:absolute;left:4%;color:var(--ink);font-size:10px;letter-spacing:.08em}
+#native-preview::before{content:"NEOS75";top:2%}
+#native-preview::after{content:"HOST / USB";bottom:4%}
+#native-preview>span{display:flex;align-items:center;padding:0 7px;background:var(--line);border-radius:3px;
+  border-left:2px solid var(--ink);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:clamp(11px,2vw,19px)}
+#native-preview>span.empty{color:#b8c2cb}
+:where(#widgets, #catalog) :is(button, select, input, summary):focus-visible{outline:2px solid #0759a3;outline-offset:3px}
+@media(max-width:375px){.theme-chip{column-gap:5px;padding-inline:6px}}

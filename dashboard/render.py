@@ -22,6 +22,7 @@ import argparse
 import datetime as dt
 import io
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -108,7 +109,40 @@ THEMES = {
     },
 }
 
-THEME_NAMES = ("hades", "selene", "venus", "athena")
+def _skin(base, label, blurb, **colors):
+    return {**THEMES[base], "label": label, "blurb": blurb, **colors}
+
+
+THEMES.update({
+    "abyss": _skin("hades", "深海青", "深海绿底，薄荷刻度", BG=(16, 38, 43),
+                   CARD=(24, 54, 61), CARD_HI=(29, 64, 71), LINE=(44, 79, 83),
+                   TRACK=(42, 72, 77), TXT=(233, 248, 245), DIM=(174, 205, 203),
+                   ACCENT=(139, 229, 208), NA=(167, 194, 195)),
+    "porcelain": _skin("athena", "暖瓷", "暖白釉面，陶土刻度", BG=(245, 237, 224),
+                       CARD=(255, 250, 241), CARD_HI=(255, 253, 248),
+                       TRACK=(230, 216, 199), LINE=(222, 206, 190), TXT=(51, 38, 32),
+                       DIM=(107, 79, 64), ACCENT=(140, 72, 46), NA=(113, 89, 75)),
+    "amethyst": _skin("hades", "紫曜", "黑紫色底，淡紫刻度", BG=(28, 22, 39),
+                      CARD=(41, 32, 56), CARD_HI=(54, 41, 70), TRACK=(66, 50, 82),
+                      LINE=(73, 57, 89), TXT=(248, 237, 255), DIM=(201, 178, 220),
+                      ACCENT=(217, 180, 255), NA=(191, 172, 204)),
+    "glacier": _skin("venus", "冰湖", "冰白色底，靛青刻度", BG=(225, 238, 243),
+                     CARD=(246, 252, 253), CARD_HI=(252, 254, 255), TRACK=(203, 224, 232),
+                     LINE=(192, 213, 223), TXT=(23, 48, 65), DIM=(64, 91, 109),
+                     ACCENT=(18, 99, 134), NA=(73, 99, 116)),
+})
+# Use darker signal inks on reflective/light backgrounds; retain meaning in text.
+for _name, _accent in (("venus", (123, 76, 33)), ("athena", (119, 82, 22))):
+    THEMES[_name]["ACCENT"] = _accent
+for _theme in THEMES.values():
+    if _theme["light"]:
+        _theme.update(GOOD=(23, 104, 71), WARN=(128, 78, 15), BAD=(161, 42, 49))
+        if _theme["NA"] == (138, 143, 150) or _theme["NA"] == (148, 142, 132):
+            _theme["NA"] = (91, 93, 99)
+    elif _theme["NA"] in ((96, 104, 120), (108, 114, 122)):
+        _theme["NA"] = (164, 174, 190)
+
+THEME_NAMES = ("hades", "selene", "venus", "athena", "abyss", "porcelain", "amethyst", "glacier")
 THEME = "hades"
 
 # 下面这些全局名会被 apply_theme() 按主题覆盖，绘制函数全部引用它们
@@ -201,6 +235,7 @@ PRESETS = {
     "desk": ["clock_big", "playing", "calendar", "cpu", "mem", "link", "net_pulse", "battery"],
     # 听歌时用：歌名占一半，剩下留给机器状态
     "media": ["playing", "clock_big", "calendar", "link", "net_pulse", "cpu"],
+    "studio": ["focus_timer", "clock_utc", "day_progress", "mem_available"],
 }
 
 
@@ -264,12 +299,31 @@ def _fs(h, frac, lo, hi):
 def card(d, b, fill=None):
     if fill is None:
         fill = CARD
-    d.rounded_rectangle([b["x"], b["y"], b["x"] + b["w"] - 1, b["y"] + b["h"] - 1], radius=7, fill=fill)
+    x, y, w, h = b["x"], b["y"], b["w"], b["h"]
+    d.rounded_rectangle([x, y, x + w - 1, y + h - 1], radius=5, fill=fill, outline=LINE)
+    if w >= 24 and h >= 36:
+        d.line((x + w - 17, y + 9, x + w - 8, y + 9), fill=LINE, width=2)
 
 
 def cap(d, b, text):
     """格子左上角的部件标签。"""
     d.text((b["x"] + 8, b["y"] + 6), str(text), font=F(_fs(b["h"], 0.17, 9, 15), "bd", text), fill=DIM)
+
+
+# Simple line marks stay distinct on the LCD and cost little to encode.
+ICONS = {
+    "time": (((6, 1), (10, 3), (11, 7), (9, 10), (5, 11), (2, 9), (1, 5), (3, 2), (6, 1)),
+             ((6, 3), (6, 6), (8, 7))),
+    "performance": (((2, 3), (10, 3), (10, 9), (2, 9), (2, 3)),
+                    ((4, 1), (4, 3)), ((8, 9), (8, 11)), ((5, 6), (7, 6))),
+    "network": (((1, 5), (4, 3), (8, 3), (11, 5)), ((3, 7), (6, 5), (9, 7)), ((5, 9), (7, 9))),
+    "system": (((1, 3), (11, 3), (11, 9), (1, 9), (1, 3)), ((4, 6), (8, 6))),
+}
+
+
+def icon(d, x, y, kind, color):
+    for line in ICONS[kind]:
+        d.line([(x + dx, y + dy) for dx, dy in line], fill=color, width=1)
 
 
 def bar(d, x, y, w, h, pct, color, track=None):
@@ -360,7 +414,15 @@ def _frame(d, b, label=None, fill=None):
     card(d, b, fill)
     lab = _fs(b["h"], 0.17, 8, 15)
     if label:
-        put(d, (b["x"] + 7, b["y"] + 5), label, lab, "bd", DIM)
+        x, y, w = b["x"], b["y"], b["w"]
+        group = WMAP.get(b.get("id"), {}).get("group")
+        kind = {"时间": "time", "效率": "time", "性能": "performance", "网络": "network"}.get(group, "system")
+        show_icon = b["h"] >= 43 and w >= 94
+        inset = 24 if show_icon else 8
+        if show_icon:
+            icon(d, x + 8, y + 5 + (lab - 11) // 2, kind, ACCENT)
+        heading, size = fitw(label, w - inset - 22, lab, "bd", 8)
+        put(d, (x + inset, y + 4), heading, size, "bd", DIM)
     cx = b["x"] + 7
     cy = b["y"] + lab + 7
     cw = max(4, b["w"] - 14)
@@ -378,7 +440,7 @@ def _metric(d, b, label, value, unit, color, sub=None, pct=None, fill=None):
     bar_h = max(4, int(ch * 0.18)) if (pct is not None and ch >= 26) else 0
     sub_h = max(9, int(ch * 0.22)) if (sub and ch >= 22) else 0
     inner = ch - bar_h - sub_h - (3 if (bar_h or sub_h) else 0)
-    vs = max(9, min(40, int(max(9, inner) * 0.94)))
+    vs = max(9, min(52, int(max(9, inner) * 0.94)))
     us = max(8, int(vs * 0.48))
     val = value
     unit = unit or ""
@@ -400,10 +462,11 @@ def _metric(d, b, label, value, unit, color, sub=None, pct=None, fill=None):
     ymid = cy + max(9, inner) * 0.5
     put(d, (cx, ymid), vtxt, vs, "bd", color, anchor="lm")
     if unit:
-        put(d, (cx + cw, ymid), unit, us, "bd", color, anchor="rm")
+        unit_x = min(cx + cw - uw, cx + tw(vtxt, vs, "bd") + 4)
+        put(d, (unit_x, ymid), unit, us, "bd", color, anchor="lm")
     y = cy + max(9, inner)
     if sub_h:
-        stxt, ssz = fitw(sub, cw, sub_h, "mono", 8)
+        stxt, ssz = fitw(sub, cw, min(16, sub_h), "mono", 8)
         put(d, (cx, y + sub_h * 0.5), stxt, ssz, "mono", DIM, anchor="lm")
         y += sub_h + 3
     if bar_h:
@@ -551,9 +614,44 @@ def resolve_widgets(widgets=None, preset="default"):
 # ── 各部件绘制 ────────────────────────────────────────────────────
 def draw_clock_big(d, b, st, ctx):
     cx, cy, cw, ch = _frame(d, b, "时间", CARD_HI)
-    vs = max(14, min(54, int(ch * 0.80)))
+    vs = max(12, min(72, int(ch * 0.88)))
     vtxt, vs = fitw(txt(st.get("clock"), "--:--:--"), cw, vs, "bd", 14)
-    put(d, (cx + cw / 2, cy + ch / 2), vtxt, vs, "bd", ACCENT, anchor="mm")
+    put(d, (cx + 3, cy + ch / 2), vtxt, vs, "bd", ACCENT, anchor="lm")
+
+
+def draw_clock_utc(d, b, st, ctx):
+    _metric(d, b, "世界时间", txt(st.get("clock_utc")), "UTC", ACCENT)
+
+
+def day_progress(clock):
+    try:
+        current = dt.time.fromisoformat(clock)
+    except (TypeError, ValueError):
+        return None
+    return (current.hour * 60 + current.minute) * 100 // 1440
+
+
+def draw_day_progress(d, b, st, ctx):
+    p = day_progress(st.get("clock"))
+    _metric(d, b, "今日进度", num(p, 0), "%" if p is not None else "", ACCENT, pct=p)
+
+
+def draw_mem_available(d, b, st, ctx):
+    available = st.get("mem_available_gb")
+    _metric(d, b, "可用内存", num(available, 1), "GB" if available is not None else "", TXT)
+
+
+def format_focus(seconds):
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or seconds < 0:
+        return None
+    minutes, remaining = divmod(int(seconds), 60)
+    return f"{minutes:02d}:{remaining:02d}"
+
+
+def draw_focus_timer(d, b, st, ctx):
+    clock = format_focus(st.get("focus_remaining"))
+    detail = "从桌面应用启动" if clock is None else ("时间到" if clock == "00:00" else "剩余时间")
+    _metric(d, b, "专注倒计时", clock or "未启动", "", ACCENT, sub=detail, fill=CARD_HI)
 
 
 WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
@@ -876,6 +974,10 @@ def draw_net_pulse(d, b, st, ctx):
 
 
 DRAW_FNS = {
+    "draw_focus_timer": draw_focus_timer,
+    "draw_clock_utc": draw_clock_utc,
+    "draw_day_progress": draw_day_progress,
+    "draw_mem_available": draw_mem_available,
     "draw_weather": draw_weather,
     "draw_codex": draw_codex,
     "draw_clock_big": draw_clock_big,
@@ -934,7 +1036,7 @@ def render(st, widgets=None, preset="default", quality=72, limit=None, history=N
            theme=None):
     """返回 (jpeg_bytes, PIL.Image)。st 里缺失/null 的字段一律画 n/a，不崩。
 
-    theme 决定四套配色之一（hades/selene/venus/athena）；None 表示沿用当前全局。
+    theme 决定彩色皮肤；None 表示沿用当前全局。
     """
     if not isinstance(st, dict):
         st = {}
@@ -946,7 +1048,7 @@ def render(st, widgets=None, preset="default", quality=72, limit=None, history=N
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
     # 顶部一条极细的强调线，避免整体过暗
-    d.rectangle([0, 0, W, 2], fill=TOPLINE)
+    d.rectangle([MARGIN, 0, W - MARGIN - 1, 1], fill=LINE)
     # 右下角原本印着分辨率，那是开发时确认画布用的，用户看不懂也不需要，
     # 还会在浅色主题上显得脏。删掉。
 
@@ -1015,6 +1117,26 @@ def registry_json():
     }
 
 
+def native_background(skin):
+    """Dark static wallpaper under the existing four white firmware labels."""
+    palettes = {"graphite": ((15, 20, 28), (26, 35, 48), (104, 172, 225)),
+                "tide": ((13, 33, 37), (20, 50, 55), (118, 220, 191))}
+    bg, panel, ink = palettes[skin]
+    img = Image.new("RGB", (W, H), bg)
+    d = ImageDraw.Draw(img)
+    put(d, (20, 6), "NEOS75", 14, "bd", ink)
+    put(d, (460, 7), "LIVE", 12, "mono", ink, anchor="ra")
+    for row in range(4):
+        y = 28 + 70 * row
+        d.rounded_rectangle((10, y, 469, y + 62), 5, fill=panel)
+        d.line((10, y + 10, 10, y + 52), fill=ink, width=2)
+    d.line((20, 317, 460, 317), fill=panel, width=2)
+    for x, kind in zip(range(20, 420, 20), ICONS):
+        icon(d, x, 331, kind, ink)
+    put(d, (460, 332), "HOST / USB", 13, "mono", ink, anchor="ra")
+    return img
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="状态 JSON → 480x360 baseline JPEG")
     ap.add_argument("--in", dest="inp", default=None, help="状态 JSON 路径（- 表示 stdin）")
@@ -1024,7 +1146,9 @@ def main(argv=None):
     ap.add_argument("--quality", type=int, default=72)
     ap.add_argument("--limit", type=int, default=None, help="字节上限，超出则二分降质量")
     ap.add_argument("--theme", default=None, choices=list(THEME_NAMES),
-                    help="四套配色：hades(黑) / selene(灰) / venus(银) / athena(白)")
+                    help="彩色看板皮肤（--list 查看色样）")
+    ap.add_argument("--native-base", choices=("graphite", "tide"),
+                    help="生成四行白字下的静态 JPEG 底图，需要 --out")
     ap.add_argument("--preview", default=None, help="另存一张 PNG 预览")
     ap.add_argument("--state-dir", dest="state_dir", default=None, help="历史采样目录（供 history_cpu）")
     ap.add_argument("--list", action="store_true", help="打印部件注册表 JSON 后退出")
@@ -1033,6 +1157,14 @@ def main(argv=None):
 
     if a.theme:
         apply_theme(a.theme)
+
+    if a.native_base:
+        if not a.out:
+            ap.error("--native-base 需要 --out")
+        out = Path(a.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        native_background(a.native_base).save(out, format="JPEG", quality=82, optimize=True, progressive=False)
+        return 0
 
     if a.list:
         print(json.dumps(registry_json(), ensure_ascii=False, indent=2))

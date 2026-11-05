@@ -8,6 +8,7 @@ import copy
 import datetime as dt
 import importlib.util
 import json
+import math
 import os
 import shutil
 from pathlib import Path
@@ -158,7 +159,7 @@ class Sampler:
             self._collecting = True
             threading.Thread(target=self._enrich, daemon=True).start()
             threading.Thread(target=self._enrich_media, daemon=True).start()
-        now = dt.datetime.now()
+        now = dt.datetime.now().astimezone()
         mem = psutil.virtual_memory()
         net, tick = psutil.net_io_counters(), time.monotonic()
         elapsed = max(0.01, tick - self.tick)
@@ -182,10 +183,12 @@ class Sampler:
                        if any(key in name.lower() for key in ('cpu', 'coretemp', 'k10temp'))
                        for e in values if e.current is not None]
         result = dict(clock=now.strftime('%H:%M:%S'), date=now.strftime('%Y-%m-%d'),
+                    clock_utc=now.astimezone(dt.timezone.utc).strftime('%H:%M'),
                     host=socket.gethostname(), ip=ip,
                     uptime=f'{seconds // 86400}d {seconds // 3600 % 24:02}:{seconds // 60 % 60:02}',
                     cpu_load=psutil.cpu_percent(interval=0.15), cpu_freq_ghz=freq.current / 1000 if freq else None,
                     mem_pct=mem.percent, mem_used_gb=mem.used / 2**30, mem_total_gb=mem.total / 2**30,
+                    mem_available_gb=mem.available / 2**30,
                     disk_free_gb=psutil.disk_usage(str(Path.home().anchor)).free / 2**30,
                     net_down_mbps=down, net_up_mbps=up,
                     bat_pct=bat.percent if bat else None, bat_ac=bat.power_plugged if bat else True,
@@ -218,6 +221,7 @@ class Api:
         self._log = []
         self._preview = []
         self._revision = 0
+        self._focus_deadline = None
         self._registry = self._renderer.registry_json()
         self._rows = load_native_rows()
         self._knob_catalog = None
@@ -305,7 +309,7 @@ class Api:
         return value
 
     def _theme(self, value):
-        """四套配色之一。留空或旧配置没有这个键时退回深色。"""
+        """留空或旧配置没有这个键时退回深色。"""
         names = [t['id'] for t in self._registry.get('themes', [])]
         if not names:
             names = ['hades']
@@ -395,17 +399,48 @@ class Api:
                     config=copy.deepcopy(self._config), backupDirectory=str(self._dir / 'backups'),
                     native=native,
                     nativeNote='文字组件直接写入键盘内存：每屏四行、只支持英文与数字，中文会显示为空。',
-                    themeNote='四套配色对应官方四种颜色：Hades 黑 / Selene 灰 / Venus 银 / Athena 白。',
+                    themeNote='彩色看板可选择深色或浅色；原生通道始终使用固件的白色文字。',
                     knob=self._knob_payload(),
                     sensorNote='温度、GPU、音量取决于系统数据源；不可用时显示 n/a。')
 
     def snapshot(self, revision=-1):
         with self._mutex:
             data = dict(state=copy.deepcopy(self._state), revision=self._revision, displayPage=self._display_page,
-                        text=list(self._native['rows']))
+                        text=list(self._native['rows']), focus=self._focus_remaining())
             if revision != self._revision:
                 data['previews'] = list(self._preview)
             return data
+
+    def _focus_remaining(self):
+        with self._mutex:
+            if self._focus_deadline is None:
+                return None
+            return max(0, math.ceil(self._focus_deadline - time.monotonic()))
+
+    def set_focus(self, minutes=None):
+        """Run or clear a session timer; no device I/O even during a stream."""
+        if minutes is not None and (type(minutes) is not int or not 1 <= minutes <= 90):
+            return {'ok': False, 'message': '请输入 1 到 90 之间的整数分钟。'}
+        with self._mutex:
+            self._focus_deadline = None if minutes is None else time.monotonic() + minutes * 60
+            return {'ok': True, 'focus': self._focus_remaining()}
+
+    def export_native_base(self, skin):
+        if skin not in ('graphite', 'tide'):
+            return {'ok': False, 'message': '请选择有效底图。'}
+        if self._window is None:
+            return {'ok': False, 'message': '文件保存窗口不可用。'}
+        from webview import FileDialog
+        target = self._window.create_file_dialog(FileDialog.SAVE,
+            save_filename='NEOS75-' + skin + '.jpg', file_types=('JPEG (*.jpg;*.jpeg)',))
+        if not target:
+            return {'ok': True, 'saved': False}
+        path = Path(target[0] if isinstance(target, (list, tuple)) else target)
+        if path.suffix.lower() not in ('.jpg', '.jpeg'):
+            return {'ok': False, 'message': '请使用 .jpg 或 .jpeg 扩展名保存。'}
+        self._renderer.native_background(skin).save(
+            path, format='JPEG', quality=82, optimize=True, progressive=False)
+        return {'ok': True, 'saved': True}
 
     def diagnostics(self):
         with self._mutex:
@@ -459,6 +494,7 @@ class Api:
     def _read_state(self):
         state = self._sampler.read()
         state.update(self._sources.read(self._config['widgets'], self._config))
+        state['focus_remaining'] = self._focus_remaining()
         return state
 
     def _native_rows(self, state=None):
@@ -556,7 +592,9 @@ class Api:
             process = bridge.native_popen()
             self._native_process = process
             try:
-                self._write_native(process, {'mask': mask})
+                reply = self._write_native(process, {'mask': mask})
+                if reply.get('error'):
+                    raise ValueError(reply['error'])
                 self._line('原生组件已启用：第 %s 屏' % '、'.join(str(p) for p in pages))
                 sent = 0
                 interval = self._config.get('native_interval', 3)
@@ -573,11 +611,13 @@ class Api:
                                             % '、'.join(str(p) for p in pages))
                         self._stop.wait(max(0.2, interval - (time.monotonic() - begun)))
                         continue
-                    sent += 1
+                    frame = reply.get('frame') or {}
+                    written = frame.get('written', 4)
+                    sent += int(written > 0)
                     self._event(nativeSent=sent, connected=True, connection='USB 已连接',
                                 title='正在同步文字组件',
-                                message=('已发送 %d 帧 · 有 %d 个组件无法写成文字' % (sent, len(omitted)))
-                                if omitted else '已发送 %d 帧，请看屏确认。' % sent)
+                                message=('本轮写入 %d 行 · 已更新 %d 轮' % (written, sent))
+                                + (' · %d 个组件未显示' % len(omitted) if omitted else ' · 请看屏确认。'))
                     self._stop.wait(max(0.2, interval - (time.monotonic() - begun)))
             finally:
                 self._native_process = None
@@ -817,6 +857,8 @@ class Api:
             self._event(stream=True, sent=0, title='正在连接屏幕', message='请关闭其他上传程序。', phase='stream')
             bridge = self._core.dash()
             page, sent = 0, 0
+            previous = None
+            last_sent = -math.inf
             while not self._stop.is_set():
                 begun = time.monotonic()
                 with self._render_lock:
@@ -827,12 +869,17 @@ class Api:
                 with self._mutex:
                     selected = self._display_page
                 index = page % len(frames) if selected is None else min(selected, len(frames) - 1)
-                image.write_bytes(frames[index])
-                bridge.push_once('push', image=image, on_line=self._line, timeout=45)
-                sent += 1
+                current = frames[index]
+                identical = current == previous and begun - last_sent < 30
+                if not identical:
+                    image.write_bytes(current)
+                    bridge.push_once('push', image=image, on_line=self._line, timeout=45)
+                    previous, last_sent = current, time.monotonic()
+                    sent += 1
                 page += 1
                 self._event(sent=sent, connected=True, connection='USB 已连接', title='正在同步小组件',
-                            message='已发送，请在键盘屏幕确认显示。', progress=0)
+                            message='画面没有变化，跳过本次上传。' if identical else
+                                    '已发送，请在键盘屏幕确认显示。', progress=0)
                 self._stop.wait(max(0.1, self._config['interval'] - (time.monotonic() - begun)))
             self._event(title='同步已停止', message='键盘保留最后发送的画面。', phase='idle')
         return self._job('stream', work)

@@ -28,14 +28,23 @@
     <section id="widgets" aria-labelledby="widgets-title" hidden>
       <div class="widget-heading"><div><p class="eyebrow">键盘小屏</p><h1 id="widgets-title">自由组合小组件</h1><p class="subtitle">选几个常用组件，放进键盘小屏。</p></div><button class="secondary glass" id="add-widget"><span aria-hidden="true">＋</span> 添加组件</button></div>
       <div class="widget-layout">
-        <div class="editor"><div class="editor-heading"><h2>已添加 <span id="widget-count">0</span></h2><label class="sr-only" for="preset">组件预设</label><select id="preset"><option value="custom">自定义</option><option value="minimal">日常</option><option value="performance">性能</option><option value="network">网络</option><option value="weather">天气</option><option value="desk">桌面常驻</option><option value="media">听歌</option><option value="codex">Codex</option><option value="default">常用组合</option><option value="full">全部组件</option></select></div>
+        <div class="editor"><div class="editor-heading"><h2>已添加 <span id="widget-count">0</span></h2><label class="sr-only" for="preset">组件预设</label><select id="preset"><option value="custom">自定义</option><option value="minimal">日常</option><option value="studio">专注桌面</option><option value="performance">性能</option><option value="network">网络</option><option value="weather">天气</option><option value="desk">桌面常驻</option><option value="media">听歌</option><option value="codex">Codex</option><option value="default">常用组合</option><option value="full">扩展看板</option></select></div>
           <p id="empty" class="empty" hidden>小屏还空着。<br><button class="text-button" id="empty-add">添加第一个组件</button></p>
           <ol id="widget-list" aria-label="组件顺序"></ol>
-          <div class="interval-row"><label for="interval">刷新间隔</label><select id="interval"><option value="3">3 秒</option><option value="5">5 秒</option><option value="10">10 秒</option></select></div>
+          <div class="interval-row"><label for="interval">彩色看板采样间隔</label><select id="interval"><option value="3">3 秒</option><option value="5">5 秒</option><option value="10">10 秒</option></select></div>
+          <form class="focus-tool" id="focus-form" hidden>
+            <label for="focus-minutes">专注时长（分钟）</label>
+            <div class="focus-controls">
+              <input id="focus-minutes" name="minutes" type="number" min="1" max="90" step="1" value="25" required>
+              <button class="secondary" type="submit">开始计时</button>
+              <button class="text-button" id="focus-clear" type="button">清除</button>
+            </div>
+            <p class="hint">剩余 <span id="focus-left" role="timer">—</span></p>
+          </form>
           <p class="hint">组件较多时自动分页轮播，保持文字清晰。<button class="text-button" id="data-settings">天气与 Codex 设置</button></p>
         </div>
         <div class="preview-column"><div class="preview-heading"><h2>屏幕预览</h2><button class="icon-button" id="preview-refresh" aria-label="刷新电脑数据与预览">↻</button></div>
-          <div class="theme-row"><span class="theme-label">配色</span><div class="theme-chips" id="theme-chips" role="radiogroup" aria-label="配色"></div></div>
+          <div class="theme-row"><span class="theme-label" id="theme-label">屏幕皮肤</span><div class="theme-chips" id="theme-chips" role="radiogroup" aria-labelledby="theme-label"></div></div>
           <div class="screen-case preview-case"><div class="preview-surface"><img id="preview-image" width="480" height="360" alt="键盘小组件实际渲染预览" hidden><p id="preview-placeholder">添加组件，预览你的小屏</p></div></div>
           <div class="pages"><button class="icon-button" id="prev-page" aria-label="上一页">‹</button><span id="page-label">480 × 360</span><button class="icon-button" id="next-page" aria-label="下一页">›</button></div>
           <div class="display-choice"><button class="secondary" id="pin-page">固定当前组件页</button><button class="text-button" id="cycle-pages">自动轮播全部页</button><span id="display-mode" role="status">自动轮播</span></div>
@@ -45,10 +54,16 @@
         </div>
       </div>
       <div class="native-panel glass" id="native-panel">
-        <div class="native-heading"><div><p class="eyebrow">文字组件</p><h2>直接写进键盘内存的四行文字</h2></div><button class="icon-button" id="native-refresh" aria-label="刷新文字画面">↻</button></div>
-        <p class="hint" id="native-note">这条通道不擦写固件、不需要上传图片，所以能把刷新做到两三秒一次。每屏固定四行，只接受英文、数字和常见符号；中文会显示成空格。</p>
-        <fieldset class="native-pages"><legend>显示在哪些界面</legend><div id="native-pages"></div><p class="hint">选中的界面会被组件覆盖，没选的界面保持官方原样。</p></fieldset>
-        <div class="native-surface" id="native-preview" role="status" aria-live="polite" aria-label="四行文字预览"></div>
+        <div class="native-heading"><div><h2>静态底图与实时文字</h2></div><button class="icon-button" id="native-refresh" aria-label="刷新文字画面">↻</button></div>
+        <p class="hint" id="native-note">原生文字组件每屏四行，仅支持英文、数字和常见符号。</p>
+        <div class="native-base-actions">
+          <label for="native-base">静态底图</label>
+          <select id="native-base"><option value="graphite">石墨蓝</option><option value="tide">深海青</option></select>
+          <button class="secondary" id="native-export">保存 JPEG</button>
+        </div>
+        <p class="hint">先在 A HUB 的自定义媒体页导入底图，再只勾选该页并连续发送文字。请先停止彩色看板同步，以免它覆盖底图。需要已安装原生文字组件补丁的固件。</p>
+        <fieldset class="native-pages"><legend>显示在哪些界面</legend><div id="native-pages"></div><p class="hint">单页同步只写入发生变化的行，并定期同步全部四行；多页始终更新当前页的四行。</p></fieldset>
+        <div class="native-surface" id="native-preview" data-skin="graphite" aria-label="四行文字与底图示意"></div>
         <div class="interval-row"><label for="native-interval">文字刷新间隔</label><select id="native-interval"><option value="2">2 秒</option><option value="3">3 秒</option><option value="5">5 秒</option><option value="10">10 秒</option></select></div>
         <div class="native-actions"><button class="secondary" id="native-check">检查设备</button><button class="secondary" id="native-apply">应用界面选择</button><button class="primary" id="native-send">发送一帧</button><button class="secondary" id="native-stream">连续发送</button><button class="secondary" id="native-off">关闭文字组件</button></div>
       </div>
