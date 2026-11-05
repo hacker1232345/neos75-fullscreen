@@ -1,0 +1,74 @@
+{
+ "base": "0x8000000",
+ "codes": {
+  "scr-ccw": {
+   "bright-down": "be2000f0d7fd1022013afdd1be2004f051fd56e000bf",
+   "bright-up": "bd2000f0d7fd1022013afdd1bd2004f051fd56e000bf",
+   "calc": "b22000f0d7fd1022013afdd1b22004f051fd56e000bf",
+   "eject": "ad2000f0d7fd1022013afdd1ad2004f051fd56e000bf",
+   "fast-forward": "b02000f0d7fd1022013afdd1b02004f051fd56e000bf",
+   "home": "c02000f0d7fd1022013afdd1c02004f051fd56e000bf",
+   "mail": "bf2000f0d7fd1022013afdd1bf2004f051fd56e000bf",
+   "mute": "a82000f0d7fd1022013afdd1a82004f051fd56e000bf",
+   "next": "ab2000f0d7fd1022013afdd1ab2004f051fd56e000bf",
+   "none": "c12000f0d7fd1022013afdd1c12004f051fd56e000bf",
+   "page": "487980b30888adf800000098fbf7baff022804d00221",
+   "play-pause": "bb2000f0d7fd1022013afdd1bb2004f051fd56e000bf",
+   "prev": "ac2000f0d7fd1022013afdd1ac2004f051fd56e000bf",
+   "rewind": "ae2000f0d7fd1022013afdd1ae2004f051fd56e000bf",
+   "stop": "bc2000f0d7fd1022013afdd1bc2004f051fd56e000bf",
+   "vendor-183": "af2000f0d7fd1022013afdd1af2004f051fd56e000bf",
+   "vendor-18a": "b12000f0d7fd1022013afdd1b12004f051fd56e000bf",
+   "vendor-194": "b32000f0d7fd1022013afdd1b32004f051fd56e000bf",
+   "vendor-221": "b42000f0d7fd1022013afdd1b42004f051fd56e000bf",
+   "vendor-223": "b52000f0d7fd1022013afdd1b52004f051fd56e000bf",
+   "vendor-224": "b62000f0d7fd1022013afdd1b62004f051fd56e000bf",
+   "vendor-225": "b72000f0d7fd1022013afdd1b72004f051fd56e000bf",
+   "vendor-226": "b82000f0d7fd1022013afdd1b82004f051fd56e000bf",
+   "vendor-227": "b92000f0d7fd1022013afdd1b92004f051fd56e000bf",
+   "vendor-22a": "ba2000f0d7fd1022013afdd1ba2004f051fd56e000bf",
+   "vol-down": "aa2000f0d7fd1022013afdd1aa2004f051fd56e000bf",
+   "vol-up": "a92000f0d7fd1022013afdd1a92004f051fd56e000bf"
+  },
+  "scr-cw": {
+   "bright-down": "be2000f0c6fd1022013afdd1be2004f040fd45e000bf00bf",
+   "bright-up": "bd2000f0c6fd1022013afdd1bd2004f040fd45e000bf00bf",
+   "calc": "b22000f0c6fd1022013afdd1b22004f040fd45e000bf00bf",
+   "eject": "ad2000f0c6fd1022013afdd1ad2004f040fd45e000bf00bf",
+   "fast-forward": "b02000f0c6fd1022013afdd1b02004f040fd45e000bf00bf",
+   "home": "c02000f0c6fd1022013afdd1c02004f040fd45e000bf00bf",
+   "mail": "bf2000f0c6fd1022013afdd1bf2004f040fd45e000bf00bf",
+   "mute": "a82000f0c6fd1022013afdd1a82004f040fd45e000bf00bf",
+   "next": "ab2000f0c6fd1022013afdd1ab2004f040fd45e000bf00bf",
+   "none": "c12000f0c6fd1022013afdd1c12004f040fd45e000bf00bf",
+   "page": "4879f8b10888adf800000098fbf7a9ff022801d00121ede7",
+   "play-pause": "bb2000f0c6fd1022013afdd1bb2004f040fd45e000bf00bf",
+   "prev": "ac2000f0c6fd1022013afdd1ac2004f040fd45e000bf00bf",
+   "rewind": "ae2000f0c6fd1022013afdd1ae2004f040fd45e000bf00bf",
+   "stop": "bc2000f0c6fd1022013afdd1bc2004f040fd45e000bf00bf",
+   "vendor-183": "af2000f0c6fd1022013afdd1af2004f040fd45e000bf00bf",
+   "vendor-18a": "b12000f0c6fd1022013afdd1b12004f040fd45e000bf00bf",
+   "vendor-194": "b32000f0c6fd1022013afdd1b32004f040fd45e000bf00bf",
+   "vendor-221": "b42000f0c6fd1022013afdd1b42004f040fd45e000bf00bf",
+   "vendor-223": "b52000f0c6fd1022013afdd1b52004f040fd45e000bf00bf",
+   "vendor-224": "b62000f0c6fd1022013afdd1b62004f040fd45e000bf00bf",
+   "vendor-225": "b72000f0c6fd1022013afdd1b72004f040fd45e000bf00bf",
+   "vendor-226": "b82000f0c6fd1022013afdd1b82004f040fd45e000bf00bf",
+   "vendor-227": "b92000f0c6fd1022013afdd1b92004f040fd45e000bf00bf",
+   "vendor-22a": "ba2000f0c6fd1022013afdd1ba2004f040fd45e000bf00bf",
+   "vol-down": "aa2000f0c6fd1022013afdd1aa2004f040fd45e000bf00bf",
+   "vol-up": "a92000f0c6fd1022013afdd1a92004f040fd45e000bf00bf"
+  }
+ },
+ "sites": {
+  "scr-ccw": {
+   "addr": "0x80116fc",
+   "span": 22
+  },
+  "scr-cw": {
+   "addr": "0x801171e",
+   "span": 24
+  }
+ },
+ "source": "tools/gen_knob_code.py"
+}

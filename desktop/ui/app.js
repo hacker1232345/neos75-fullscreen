@@ -37,12 +37,82 @@ function paint() { const busy=!!state.busy; $('connection-label').textContent = 
   $('pin-page').setAttribute('aria-pressed',String(displayPage===page));
   if($('catalog').open) $('catalog-list').querySelectorAll('button').forEach(b=>{b.disabled=busy||b.textContent==='已添加';});
   paintNative(busy);
+  paintKnob(busy);
   paintThemes(busy);
 }
 let polling=false;
 async function poll() { if(!ready || polling) return; polling=true; try { const r=await api.snapshot(revision); state=r.state; displayPage=r.displayPage??null; if(r.text) nativeText=r.text; if(r.previews) { previews=r.previews; revision=r.revision; updatePreview(); } paint(); } catch(e) { $('status-title').textContent='连接程序失败'; $('status-message').textContent='请关闭窗口后重新打开程序。'; } finally { polling=false; } }
 function confirm(title,copy,button,fn) { $('confirm-title').textContent=title; $('confirm-copy').textContent=copy; $('confirm-action').textContent=button; confirmAction=fn; openDialog('confirmation'); }
 function nativePages() { return config.native_pages || []; }
+// ── 旋钮配置 ─────────────────────────────────────────────────────
+let knobInfo = { sites: [], actions: [], config: {}, factory: {}, note: '', applied: null };
+
+function paintKnob(busy) {
+  const grid = $('knob-grid');
+  if (!grid) return;
+  const sites = knobInfo.sites || [];
+  if (grid.dataset.count !== String(sites.length)) {
+    grid.replaceChildren();
+    for (const s of sites) {
+      const row = el('div', 'knob-row');
+      row.append(el('span', 'knob-label', s.label));
+      const select = el('select', 'knob-select');
+      select.id = 'knob-' + s.id;
+      select.dataset.site = s.id;
+      for (const a of knobInfo.actions || []) {
+        if (a.cat === 'screen' && s.id !== 'scr-cw' && s.id !== 'scr-ccw') continue;
+        const opt = el('option', null, a.label);
+        opt.value = a.id;
+        select.append(opt);
+      }
+      select.onchange = async () => {
+        const next = Object.assign({}, config.knob || {}, { [s.id]: select.value });
+        await save(Object.assign({}, config, { knob: next }));
+      };
+      row.append(select);
+      grid.append(row);
+    }
+    grid.dataset.count = String(sites.length);
+  }
+  for (const s of sites) {
+    const sel = $('knob-' + s.id);
+    if (!sel) continue;
+    const value = (knobInfo.config || {})[s.id];
+    if (value && sel.value !== value) sel.value = value;
+    sel.disabled = !!busy;
+  }
+  const note = $('knob-note');
+  if (note && knobInfo.note) note.textContent = knobInfo.note;
+  const st = $('knob-state');
+  if (st) {
+    const applied = knobInfo.applied;
+    st.textContent = applied
+      ? '已生成 ' + (applied.bytes ? Math.round(applied.bytes / 1024) + ' KB' : '') + '，可写入'
+      : '尚未生成';
+  }
+}
+
+async function knobBuild() {
+  const r = await call('knob_build');
+  if (!r.ok) toast(r.message || '未能生成');
+  await poll();
+}
+
+async function knobApply() {
+  confirm('写入旋钮配置',
+    '会先整片备份键盘固件，再擦除、写入、逐字节回验。写入期间不要拔线或退出。',
+    '备份并写入', async () => {
+      const r = await call('knob_flash', { confirmed: true });
+      if (!r.ok) toast(r.message || '写入未完成');
+      await poll();
+    });
+}
+
+async function knobReset() {
+  const next = Object.assign({}, config, { knob: Object.assign({}, knobInfo.factory || {}) });
+  await save(next);
+}
+
 function paintNative(busy) {
   const picked = new Set(nativePages());
   const holder = $('native-pages');
@@ -99,7 +169,7 @@ function paintThemes(busy) { const root=$('theme-chips'); const list=(registry&&
     b.querySelector('.swatch').style.background=`linear-gradient(135deg,${t.swatch||'#222'} 0%,${t.swatch2||t.swatch||'#888'} 100%)`;
     b.disabled=busy||!!state.busy; b.setAttribute('aria-checked', t.id===current?'true':'false'); } }
 
-async function boot(bridge) { if(ready) return; api=bridge; const data=await api.bootstrap(); registry=data.registry; config=data.config; if(data.native) nativeInfo={...nativeInfo,...data.native}; ready=true; $('version').textContent=`v${data.version}`; $('backup-path').textContent=data.backupDirectory; renderList(); renderCatalog(); await poll(); setInterval(poll,700); }
+async function boot(bridge) { if(ready) return; api=bridge; const data=await api.bootstrap(); registry=data.registry; config=data.config; if(data.native) nativeInfo={...nativeInfo,...data.native}; if(data.knob) { knobInfo={...knobInfo,...data.knob}; knobInfo.config={...(data.config.knob||{})}; } ready=true; $('version').textContent=`v${data.version}`; $('backup-path').textContent=data.backupDirectory; renderList(); renderCatalog(); await poll(); setInterval(poll,700); }
 $('tab-fullscreen').onclick=()=>showTab('fullscreen'); $('tab-widgets').onclick=()=>showTab('widgets');
 $('connect').onclick=async()=>{const r=await call('connect');if(!r.ok)toast(r.message);await poll();};
 $('patch').onclick=()=>{const force=$('force').checked; confirm(force?'无验证应用补丁':'应用全屏补丁',force?'程序会先备份，再按旧字节逐条核对能套上几层补丁。若一层都对不上，只会套最基础的一层：上传进度条和覆盖层会保留，其余功能照常。固定偏移仍可能不兼容，并有导致屏幕无法启动的风险。仍然继续？':'程序会先保存这把键盘的完整备份，再自动匹配固件、应用补丁并回验。已是全屏版本则直接跳过；未知版本会停止。部分适配配置尚待实机验收。','备份并应用',()=>call('patch',true,force));};
@@ -135,3 +205,7 @@ window.addEventListener('pywebviewready',()=>boot(window.pywebview.api));
 if(window.pywebview?.api) boot(window.pywebview.api);
 // A visual browser review can supply a local test fixture. Never exposes a USB API over HTTP.
 window.addEventListener('neos75previewready',()=>boot(window.neos75Preview));
+
+$('knob-preview').onclick = knobBuild;
+$('knob-apply').onclick = knobApply;
+$('knob-reset').onclick = knobReset;

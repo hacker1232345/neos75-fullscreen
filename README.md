@@ -79,6 +79,31 @@ python dashboard/native_rows.py --list           # 哪些部件能写成文字
 
 预设：`minimal` / `default` / `full` / `performance` / `network`，也可以任意勾选组合。
 
+## 两个旋钮，六个动作
+
+键盘上方的两个旋钮出厂是「音量」「翻页」，两个旋钮还能按下去。这六个动作位现在都能改成
+别的键——上一曲、下一曲、静音、亮度、计算器、主页等等，改完立刻生效，不需要装驱动，
+也不依赖官方软件。
+
+```sh
+python tools/knob_config.py --list                      # 列出 27 个可选动作
+python tools/knob_config.py --fw keyboard.bin --out new.bin        --vol-cw next --vol-ccw prev --vol-press mute        --scr-cw page --scr-ccw page --scr-press calc     # 只生成，不写盘
+node   tools/knob_flash.js read   --fw new.bin           # 反解一份固件当前是什么配置
+node   tools/knob_flash.js flash  --target new.bin --yes # 备份→擦除→写入→回验→固化
+```
+
+桌面程序里有一整块「两个旋钮，六个动作」面板：六个下拉框选动作，`预览改动` 只生成不写盘，
+`写入键盘` 才会真的擦写。写入前自动整片备份，写完逐字节回验，不一致就不固化。
+
+六个动作位分别是：音量旋钮顺时针 / 逆时针 / 按下，屏幕旋钮顺时针 / 逆时针 / 按下。
+
+- 前四个位（音量三格 + 屏幕旋钮按下）改的是固件里那张「动作号 → HID 码」的 tbb 表，**两份副本必须同时改**，
+  只改一份不生效——固件里有两份一模一样的表，真正被调用的是前面那份。
+- 屏幕旋钮的左右旋转**不发 HID 码**，它在固件里直接给屏幕发 A5 帧翻页。要改它得覆盖那两段代码，
+  覆盖后必须跳回原函数出口 `0x080117BE`，中途自己 `pop` 会破坏栈、键盘重启。
+- 「翻页」只有一个选项。原厂那段代码自带方向判断，同一份字节放到顺时针位就是下一屏、
+  放到逆时针位就是上一屏——拆成「下一屏/上一屏」两个选项是假的。
+
 ### 四套配色（对应官方四种颜色）
 
 官方这台键盘有四种颜色：Venus 银 / Selene 灰 / Hades 黑 / Athena 白。渲染器把这四种都做成了主题，

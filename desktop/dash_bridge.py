@@ -410,3 +410,63 @@ def push_popen(mode='loop', on_line=None, **kw):
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          text=True, encoding='utf-8', errors='replace', creationflags=NO_WINDOW)
     return p
+
+# ── 旋钮配置（键盘上方两个旋钮 × 三个动作）────────────────────────
+KNOB_SITES = ('vol-cw', 'vol-ccw', 'vol-press', 'scr-cw', 'scr-ccw', 'scr-press')
+KNOB_LABELS = {
+    'vol-cw': '音量旋钮 · 顺时针',
+    'vol-ccw': '音量旋钮 · 逆时针',
+    'vol-press': '音量旋钮 · 按下',
+    'scr-cw': '屏幕旋钮 · 顺时针',
+    'scr-ccw': '屏幕旋钮 · 逆时针',
+    'scr-press': '屏幕旋钮 · 按下',
+}
+KNOB_DEFAULTS = {
+    'vol-cw': 'vol-up', 'vol-ccw': 'vol-down', 'vol-press': 'mute',
+    'scr-cw': 'page', 'scr-ccw': 'page', 'scr-press': 'calc',
+}
+
+
+def knob_catalog():
+    """26 个内置动作 + 两种翻页，附带中文标签与 HID 码（离线，不需要设备）。"""
+    out = _run([_python(), 'tools/knob_config.py', '--catalog'], timeout=60)
+    data = json.loads(out)
+    return {
+        'sites': [{'id': s, 'label': KNOB_LABELS[s], 'factory': KNOB_DEFAULTS[s]}
+                  for s in KNOB_SITES],
+        'actions': data['actions'],
+        'note': '两个旋钮 × 三个动作共六个位置。翻页只有屏幕旋钮的左右旋转可选。',
+    }
+
+
+def knob_read(backup=None):
+    """反解一份固件里六个动作位的取值；不传就返回出厂默认。"""
+    if not backup:
+        return {'config': dict(KNOB_DEFAULTS), 'source': 'factory'}
+    out = _run([_python(), 'tools/knob_config.py', '--read', str(backup)], timeout=60)
+    return {'config': json.loads(out), 'source': str(backup)}
+
+
+def knob_build(base, out, config):
+    """在 base 上改写六个动作位，产物写到 out（离线，不碰 USB）。"""
+    args = [_python(), 'tools/knob_config.py', '--fw', str(base), '--out', str(out)]
+    for site in KNOB_SITES:
+        args += ['--' + site, str(config[site])]
+    text = _run(args, timeout=120)
+    return {'out': str(out), 'log': [ln for ln in text.strip().splitlines() if ln.strip()]}
+
+
+def knob_backup(out=None):
+    """只读整片备份键盘（0x1CE40，64 B 步进），不进 DFU 不写 Flash。"""
+    args = [_node_path(), 'tools/knob_flash.js', 'backup']
+    if out:
+        args += ['--out', str(out)]
+    return _node(args)
+
+
+def knob_flash(target, yes=False):
+    """把目标固件写进键盘：擦除 → 写 → 读回逐字节比对 → 固化。"""
+    args = [_node_path(), 'tools/knob_flash.js', 'flash', '--target', str(target)]
+    if yes:
+        args.append('--yes')
+    return _node(args)

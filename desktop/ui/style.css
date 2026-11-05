@@ -33,3 +33,12 @@
 .theme-chip[aria-checked="true"]{border-color:#0068d9;background:#e8f1ff;color:#0059bd;
   box-shadow:0 0 0 3px rgba(0,104,217,.12)}
 .theme-chip[aria-checked="true"] .swatch{border-color:rgba(0,80,170,.45)}
+
+/* ── 旋钮配置 ─────────────────────────────────────────────────── */
+.knob-panel { margin-top: 22px; padding: 22px 24px; border-radius: 22px; }
+.knob-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px 20px; margin: 16px 0 18px; }
+.knob-row { display: flex; align-items: center; gap: 10px; }
+.knob-label { flex: 0 0 108px; font-size: 13px; color: #4a5561; letter-spacing: .01em; }
+.knob-select { flex: 1; min-width: 0; height: 34px; padding: 0 10px; border-radius: 10px; border: 1px solid rgba(16, 24, 40, .14); background: #fff; color: #14181f; font-size: 13px; }
+.knob-select:disabled { opacity: .5; }
+.knob-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

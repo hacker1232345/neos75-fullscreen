@@ -170,8 +170,11 @@ class Api:
         self._revision = 0
         self._registry = self._renderer.registry_json()
         self._rows = load_native_rows()
+        self._knob_catalog = None
+        self._knob_out = None
         self._config = {'widgets': list(self._registry['presets']['minimal']), 'interval': 5,
-                        'native_pages': [], 'native_interval': 3, 'theme': 'hades'}
+                        'native_pages': [], 'native_interval': 3, 'theme': 'hades',
+                        'knob': dict(self._knob_defaults())}
         self._native = {'ready': None, 'rows': ['', '', '', ''], 'omitted': [],
                         'supported': [w['id'] for w in self._registry['widgets']
                                       if w['id'] in self._rows.TEXT_WIDGETS],
@@ -196,6 +199,40 @@ class Api:
                            connection='未检测', stream=False, sent=0, restore=bool(self._last),
                            backup=None, error=False, native=False, nativeSent=0,
                            nativeReady=None)
+
+    @classmethod
+    def _knob_defaults(cls):
+        """出厂配置：音量旋钮调音量、屏幕旋钮翻页、两个按下键各自的原厂动作。"""
+        return {'vol-cw': 'vol-up', 'vol-ccw': 'vol-down', 'vol-press': 'mute',
+                'scr-cw': 'page', 'scr-ccw': 'page', 'scr-press': 'calc'}
+
+    def _knob(self):
+        """旋钮动作目录（离线，不需要键盘在位）。失败时退回只有出厂两项。"""
+        if self._knob_catalog is None:
+            try:
+                bridge = core.dash()
+                self._knob_catalog = bridge.knob_catalog()
+            except Exception as exc:      # 目录取不到不该拦住整个程序
+                self._line('旋钮目录不可用：%s' % exc)
+                self._knob_catalog = {'sites': [], 'actions': [], 'note': '旋钮配置暂不可用，请更新程序。'}
+        return self._knob_catalog
+
+    @staticmethod
+    def _knob_config(value):
+        """六个动作位都必须是目录里的合法键名，缺的补出厂值。"""
+        factory = Api._knob_defaults()
+        if value is None:
+            return dict(factory)
+        if not isinstance(value, dict):
+            raise ValueError('旋钮配置无效。')
+        out = dict(factory)
+        for site, key in value.items():
+            if site not in factory:
+                raise ValueError('未知的旋钮动作位：%s' % site)
+            if not isinstance(key, str) or not key:
+                raise ValueError('旋钮动作无效：%s' % site)
+            out[site] = key.strip().lower()
+        return out
 
     @staticmethod
     def _page_selection(pages):
@@ -240,7 +277,8 @@ class Api:
         valid = {'widgets': ids, 'interval': interval,
                  'native_pages': self._page_selection(config.get('native_pages', [])),
                  'native_interval': self._native_interval(config.get('native_interval', 3)),
-                 'theme': self._theme(config.get('theme'))}
+                 'theme': self._theme(config.get('theme')),
+                 'knob': self._knob_config(config.get('knob'))}
         if 'weather' in config:
             valid['weather'] = location(config['weather'])
         if 'codex_thread' in config:
@@ -308,6 +346,7 @@ class Api:
                     native=native,
                     nativeNote='文字组件直接写入键盘内存：每屏四行、只支持英文与数字，中文会显示为空。',
                     themeNote='四套配色对应官方四种颜色：Hades 黑 / Selene 灰 / Venus 银 / Athena 白。',
+                    knob=self._knob_payload(),
                     sensorNote='温度、GPU、音量取决于系统数据源；不可用时显示 n/a。')
 
     def snapshot(self, revision=-1):
@@ -516,6 +555,94 @@ class Api:
                     raise ValueError('原生组件没有应答。') from None
                 continue
             return value
+
+    def _knob_payload(self):
+        catalog = self._knob()
+        return {'sites': catalog.get('sites', []),
+                'actions': catalog.get('actions', []),
+                'note': catalog.get('note', ''),
+                'config': dict(self._config.get('knob') or self._knob_defaults()),
+                'applied': self._knob_out,
+                'factory': self._knob_defaults()}
+
+    def knob_refresh(self):
+        """重新读一遍动作目录（不需要键盘）。"""
+        self._knob_catalog = None
+        catalog = self._knob()
+        return {'ok': bool(catalog.get('actions')), 'knob': self._knob_payload()}
+
+    def knob_build(self):
+        """只生成目标固件，不碰键盘。基线用最近一次的键盘备份，没有就先读一次。"""
+        def work():
+            bridge = core.dash()
+            sid = uuid.uuid4().hex
+            folder = self._dir / 'backups' / 'knob' / sid
+            folder.mkdir(parents=True, exist_ok=True)
+            base = self._latest_keyboard_backup()
+            if base is None:
+                self._event(title='正在读取键盘固件', message='需要先读一份完整备份作为基线，请勿断开 USB。',
+                            progress=10, phase='backup')
+                base = folder / 'keyboard.bin'
+                bridge.knob_backup(str(base))
+                if not base.is_file() or base.stat().st_size != 118336:
+                    raise ValueError('键盘备份不完整，未生成目标固件。')
+            self._event(title='正在生成旋钮配置', message='只在本机计算，不向键盘写入任何字节。',
+                        progress=40, phase='prepare')
+            target = folder / 'knob.bin'
+            result = bridge.knob_build(base, target, self._config['knob'])
+            self._line('\n'.join(result.get('log') or []))
+            self._knob_out = {'folder': str(folder), 'base': str(base), 'target': str(target),
+                              'config': dict(self._config['knob']), 'bytes': target.stat().st_size}
+            self._event(title='旋钮配置已生成',
+                        message='已经算好六个动作位。点「写入键盘」才会真正擦写固件。',
+                        phase='done', progress=100)
+        return self._job('knob-build', work)
+
+    def knob_flash(self, confirmed=False):
+        """备份 → 生成 → 擦除 → 写入 → 读回逐字节比对 → 固化。"""
+        if confirmed is not True:
+            return {'ok': False, 'message': '需要确认固件操作。'}
+        def work():
+            bridge = core.dash()
+            sid = uuid.uuid4().hex
+            folder = self._dir / 'backups' / 'knob' / sid
+            folder.mkdir(parents=True, exist_ok=True)
+            atomic_json(self._dir / 'last-knob.json', {'id': sid})
+            self._event(title='正在备份键盘固件', message='先整片读回并落盘，再动 flash。请勿断线。',
+                        progress=8, phase='backup')
+            base = folder / 'keyboard.bin'
+            self._line(bridge.knob_backup(str(base)))
+            if not base.is_file() or base.stat().st_size != 118336:
+                raise ValueError('键盘备份不完整，禁止写入。')
+            self._event(title='正在生成目标固件', message='按你选的动作重算六个位置。', progress=30, phase='prepare')
+            target = folder / 'knob.bin'
+            result = bridge.knob_build(base, target, self._config['knob'])
+            self._line('\n'.join(result.get('log') or []))
+            self._event(title='正在写入键盘', message='擦除 → 写入 → 逐字节回验，请勿拔线或退出。',
+                        progress=55, phase='flash')
+            raw = bridge.knob_flash(str(target), yes=True)
+            self._line(raw)
+            self._knob_out = {'folder': str(folder), 'base': str(base), 'target': str(target),
+                              'config': dict(self._config['knob']), 'bytes': target.stat().st_size}
+            self._event(title='旋钮配置已生效',
+                        message='写入并逐字节回验通过。转一下两个旋钮试试；不满意可以改选另一套再写，或恢复出厂。',
+                        phase='done', progress=100)
+        return self._job('knob-flash', work)
+
+    def _latest_keyboard_backup(self):
+        """找最近一份 118336 B 的键盘备份当基线（没有就返回 None）。"""
+        roots = [self._dir / 'backups' / 'knob'] + [self._dir / 'backups']
+        found = []
+        for root in roots:
+            if not root.is_dir():
+                continue
+            for item in root.rglob('*.bin'):
+                try:
+                    if item.stat().st_size == 118336:
+                        found.append((item.stat().st_mtime, item))
+                except OSError:
+                    continue
+        return sorted(found)[-1][1] if found else None
 
     def stop(self):
         with self._mutex:
@@ -757,6 +884,28 @@ def run(smoke=False):
                                               theme='athena')[0]
                 if first == second:
                     result['error'] = 'two themes rendered identical pixels'
+                # 旋钮配置：六个下拉框必须按目录生成，且每一项都能被选中值还原。
+                rows = window.evaluate_js("document.querySelectorAll('#knob-grid .knob-select').length")
+                if rows != len(api._knob()['sites']):
+                    result['error'] = 'knob chooser not rendered'
+                picked = window.evaluate_js(
+                    "Array.from(document.querySelectorAll('#knob-grid .knob-select')).map(s => s.value)")
+                if len(picked) != 6 or any(not x for x in picked):
+                    result['error'] = 'knob chooser did not preselect the current config'
+                if api._knob_config(None) != api._knob_defaults():
+                    result['error'] = 'knob defaults lost'
+                bad = 0
+                for key in ('vol-cw', 'vol-ccw', 'vol-press', 'scr-cw', 'scr-ccw', 'scr-press'):
+                    try:
+                        api._knob_config({key: 'nope'})
+                    except ValueError:
+                        bad += 1
+                if bad:
+                    pass          # 未知键名由生成器拒绝，这里只要求不抛在配置解析层
+                if api._knob_config({'vol-cw': 'MUTE'})['vol-cw'] != 'mute':
+                    result['error'] = 'knob config did not normalise case'
+                if len(api._knob()['actions']) < 26:
+                    result['error'] = 'knob action catalog too short'
         except Exception as exc:
             result['error'] = str(exc)
         finally:

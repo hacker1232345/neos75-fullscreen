@@ -22,3 +22,8 @@ __pycache__/
 /wtest.json
 /*.report.json
 /theme_sheet.png
+
+# keyboard backups and read-back images
+/kb_before_*.bin
+/kb_after_*.bin
+/wtest*.bin
