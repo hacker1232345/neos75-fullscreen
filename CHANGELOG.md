@@ -1,5 +1,49 @@
 # 更新记录
 
+## v1.10.0 — 2026-11-06
+
+屏幕能显示的东西多了一类：从「只有数字」变成「也能看歌、看日子、看链路」。
+
+### 新增四个组件
+
+| 组件 | 显示什么 | 数据来源 |
+|---|---|---|
+| 正在播放 | 歌名、歌手、播放/暂停状态、进度条 | Windows SMTC |
+| 日历 | 今天几号、星期、本年第几周 | 系统时间 |
+| 连接 | 有线 USB / 2.4G、往返延迟、丢包 | ping + PnP 实例 ID |
+| 网速条 | 上下行两条长度条，和数字版 `net` 互补 | 网卡计数 |
+
+### 两个新预设
+
+- `desk`：时间 + 正在播放 + 日历 + CPU/内存 + 连接 + 网速条 + 电池，八个组件一屏看完。
+- `media`：听歌时用，歌名占半屏。
+
+命令行：`--preset desk` / `--preset media`；桌面程序的预设下拉里也有这两项。
+
+### 为什么「正在播放」要用 PowerShell 5.1
+
+`Windows.Media.Control` 是 WinRT 组件，PowerShell 7 **没有 WinRT 投影**，`[Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]` 直接报「找不到类型」。所以 `media_state.ps1` 固定用 `powershell.exe`（5.1），并用反射取 `AsTask` 的重载来同步等待异步调用。初始化约 350 ms，之后每轮 4–5 ms，2 秒一采几乎无开销。
+
+### 延迟为什么测公网
+
+这台机器的默认网关是 `198.18.0.2`（代理 TUN 的虚拟网关），ping 出来恒为 0–1 ms，放在屏幕上等于没信息。改成测 `223.5.5.5`，公网不通时才退回网关，至少还能看出链路断没断。
+
+### 踩平的两个坑
+
+1. **日历显示成两个横杠**：`2026-11-06 周五` 整串不是数字，原来按 `split()` 逐段找 `isdigit()` 全部落空。改成按 `-` 切开取第三段。
+2. **`Put` 往缓存里写不存在的键**：`ping_ms` / `ping_loss` / `link_wired` 不在采样节奏表里，`$C[$k].v = ...` 在 `$null` 上取属性会抛错、被 `catch {}` 吞掉，表现是字段永远 `null`。`Put` 现在自己补建条目。
+
+### 怎么验证的
+
+- 162 项 Python 测试 + 12 组 node 测试全过；`--self-test` 11 项 PASS（`21 widgets / presets codex,default,desk,full,media,minimal,network,performance,weather`）。
+- **真机推送到屏幕**：`push.js once --preset desk` → `frames 371 / acks 6 / cycleMs 9449`。
+- 反向验证两条断言：把「没延迟写 n/a」改成「写 0」，`link_label` 的断言立刻失败；把「按 `-` 切」改回「逐段找数字」，日历断言立刻失败。
+
+### 仍然没解决的
+
+- 温度 `temp_c` 在本机恒为 `null`（WMI 两个热区接口都取不到），屏幕上照实写 `n/a`。
+- 「正在播放」只覆盖走 SMTC 的播放器（网易云、Spotify 等），独占 WASAPI 的程序看不到。
+
 ## v1.9.0 — 2026-11-05
 
 两个旋钮的六个动作位可以改了。

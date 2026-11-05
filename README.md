@@ -65,19 +65,30 @@ python dashboard/native_rows.py --list           # 哪些部件能写成文字
 
 ## 屏幕部件（可选显示）
 
-`dashboard/` 把电脑状态画成 480×360 baseline JPEG 推到屏幕上。17 个可选部件：
+`dashboard/` 把电脑状态画成 480×360 baseline JPEG 推到屏幕上。21 个可选部件：
 
 | 分组 | 部件 |
 | --- | --- |
-| 时间 | `clock_big` 超大时钟、`date` 日期 |
+| 时间 | `clock_big` 超大时钟、`date` 日期、`calendar` 今天几号 + 第几周 |
 | 性能 | `cpu`、`mem`、`gpu`、`temp` 温度、`history_cpu` 折线、`top_proc` 最占进程 |
 | 存储 | `disk` 磁盘剩余 |
-| 网络 | `net` 上下行速率、`ip` 地址 |
+| 网络 | `net` 上下行速率、`net_pulse` 网速条、`link` 连接方式 + 延迟 + 丢包、`ip` 地址 |
 | 系统 | `host` 主机名、`uptime` 运行时长 |
 | 电源 | `battery` 电池、`volume` 音量 |
-| 生活 / 工作 | `weather` 天气、`codex` Codex 状态 |
+| 生活 / 工作 | `weather` 天气、`codex` Codex 状态、`playing` 正在播放 |
 
-预设：`minimal` / `default` / `full` / `performance` / `network`，也可以任意勾选组合。
+预设：`minimal` / `default` / `full` / `performance` / `network` / `desk` / `media`，也可以任意勾选组合。
+
+`desk` 是给「一直挂在屏幕上」用的：时间 + 正在播放 + 日历 + CPU/内存 + 连接 + 网速条 + 电池，
+八个组件一屏看完。`media` 是听歌时用的，歌名占半屏。
+
+「正在播放」读的是 Windows 的 SMTC（`dashboard/media_state.ps1`，每 2 秒一行 JSON）。
+它固定用 `powershell.exe`（5.1）：`Windows.Media.Control` 是 WinRT 组件，PowerShell 7 没有
+WinRT 投影，类型根本不存在。只覆盖走 SMTC 的播放器，独占 WASAPI 的程序看不到。
+
+「连接」的延迟测的是 `223.5.5.5`。这台机器可能挂着代理 TUN，网关 `198.18.x.x` 恒 0–1 ms，
+测出来没有意义；公网不通时才退回网关，至少还能看出链路断没断。拿不到延时一律写 `n/a`，
+不拿 0 冒充。
 
 ## 两个旋钮，六个动作
 
