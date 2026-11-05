@@ -10,6 +10,7 @@ import importlib.util
 import json
 import math
 import os
+import queue
 import shutil
 from pathlib import Path
 import socket
@@ -62,7 +63,7 @@ class Sampler:
     def __init__(self):
         self.net = psutil.net_io_counters()
         self.tick = time.monotonic()
-        psutil.cpu_percent()
+        self._cpu_sample = threading.local()
         self._extra = {}
         self._extra_lock = threading.Lock()
         self._collecting = False
@@ -182,11 +183,19 @@ class Sampler:
         cpu_sensors = [e.current for name, values in sensors.items()
                        if any(key in name.lower() for key in ('cpu', 'coretemp', 'k10temp'))
                        for e in values if e.current is not None]
+        if getattr(self._cpu_sample, 'primed', False):
+            cpu = psutil.cpu_percent(interval=None)
+        else:
+            # psutil's nonblocking counter is per thread. Prime it after the
+            # first measurement so subsequent native ticks don't sleep 150 ms.
+            cpu = psutil.cpu_percent(interval=0.15)
+            psutil.cpu_percent(interval=None)
+            self._cpu_sample.primed = True
         result = dict(clock=now.strftime('%H:%M:%S'), date=now.strftime('%Y-%m-%d'),
                     clock_utc=now.astimezone(dt.timezone.utc).strftime('%H:%M'),
                     host=socket.gethostname(), ip=ip,
                     uptime=f'{seconds // 86400}d {seconds // 3600 % 24:02}:{seconds // 60 % 60:02}',
-                    cpu_load=psutil.cpu_percent(interval=0.15), cpu_freq_ghz=freq.current / 1000 if freq else None,
+                    cpu_load=cpu, cpu_freq_ghz=freq.current / 1000 if freq else None,
                     mem_pct=mem.percent, mem_used_gb=mem.used / 2**30, mem_total_gb=mem.total / 2**30,
                     mem_available_gb=mem.available / 2**30,
                     disk_free_gb=psutil.disk_usage(str(Path.home().anchor)).free / 2**30,
@@ -227,7 +236,7 @@ class Api:
         self._knob_catalog = None
         self._knob_out = None
         self._config = {'widgets': list(self._registry['presets']['minimal']), 'interval': 5,
-                        'native_pages': [], 'native_interval': 3, 'theme': 'hades',
+                        'native_pages': [], 'native_interval': 1, 'theme': 'hades', 'color_mode': 'quality',
                         'knob': dict(self._knob_defaults())}
         self._native = {'ready': None, 'rows': ['', '', '', ''], 'omitted': [],
                         'supported': [w['id'] for w in self._registry['widgets']
@@ -304,7 +313,7 @@ class Api:
 
     @staticmethod
     def _native_interval(value):
-        if value not in (2, 3, 5, 10):
+        if type(value) not in (int, float) or value not in (0.5, 1, 2, 3, 5, 10):
             raise ValueError('原生组件刷新间隔无效。')
         return value
 
@@ -326,12 +335,16 @@ class Api:
         if len(set(ids)) != len(ids):
             raise ValueError('组件不能重复。')
         interval = config.get('interval', 5)
-        if interval not in (3, 5, 10):
+        if type(interval) is not int or interval not in (2, 3, 5, 10):
             raise ValueError('刷新间隔无效。')
+        color_mode = config.get('color_mode', 'quality')
+        if color_mode not in ('quality', 'fast'):
+            raise ValueError('彩色看板画质无效。')
         valid = {'widgets': ids, 'interval': interval,
                  'native_pages': self._page_selection(config.get('native_pages', [])),
-                 'native_interval': self._native_interval(config.get('native_interval', 3)),
+                 'native_interval': self._native_interval(config.get('native_interval', 1)),
                  'theme': self._theme(config.get('theme')),
+                 'color_mode': color_mode,
                  'knob': self._knob_config(config.get('knob'))}
         if 'weather' in config:
             valid['weather'] = location(config['weather'])
@@ -374,7 +387,9 @@ class Api:
                 finally:
                     with self._mutex:
                         self._native_process = None
-                    self._event(busy=False, stream=False, kind=None)
+                        self._state.update(busy=False, stream=False, kind=None)
+                        if kind == 'native-stream':
+                            self._state['native'] = False
             self._thread = threading.Thread(target=run, daemon=True)
             self._thread.start()
         return {'ok': True}
@@ -390,6 +405,8 @@ class Api:
             return '未能连接键盘。请用 USB 数据线直连，关闭官方程序后重试；详细原因见诊断。'
         if '不匹配' in text or '未知固件' in text:
             return '这个固件暂不支持自动补丁，已停止写入。请保留自动备份并提交诊断。'
+        if text.startswith(('原生组件', '原生文字')):
+            return text
         return '操作已停止。请打开诊断查看原因；如写入曾经开始，请保留 USB 连接并使用备份恢复。'
 
     def bootstrap(self):
@@ -406,7 +423,8 @@ class Api:
     def snapshot(self, revision=-1):
         with self._mutex:
             data = dict(state=copy.deepcopy(self._state), revision=self._revision, displayPage=self._display_page,
-                        text=list(self._native['rows']), focus=self._focus_remaining())
+                        text=list(self._native['rows']), focus=self._focus_remaining(),
+                        knobResult=copy.deepcopy(self._knob_result()))
             if revision != self._revision:
                 data['previews'] = list(self._preview)
             return data
@@ -448,13 +466,18 @@ class Api:
 
     def configure(self, config):
         with self._mutex:
-            if self._state['busy']:
-                return {'ok': False, 'message': '请先停止当前操作再修改组件。'}
             try:
                 valid = self._validate(config)
+                changed = {k for k in valid.keys() | self._config.keys()
+                           if valid.get(k) != self._config.get(k)}
+                local = {'knob', 'native_pages', 'native_interval'}
+                if self._state['busy'] and (
+                        self._state['kind'] not in ('preview', 'native-preview') or changed - local):
+                    return {'ok': False, 'message': '请先停止当前操作再修改配置。'}
                 atomic_json(self._dir / 'settings.json', valid)
                 self._config = valid
-                self._display_page = None
+                if 'widgets' in changed:
+                    self._display_page = None
                 return {'ok': True, 'config': copy.deepcopy(valid)}
             except (ValueError, KeyError, TypeError, OSError) as exc:
                 return {'ok': False, 'message': str(exc)}
@@ -593,23 +616,30 @@ class Api:
             self._native_process = process
             try:
                 reply = self._write_native(process, {'mask': mask})
+                if reply is None:
+                    self._event(native=False, title='文字同步已停止', phase='idle')
+                    return
                 if reply.get('error'):
-                    raise ValueError(reply['error'])
+                    raise ValueError('原生组件启用失败：' + reply['error'])
                 self._line('原生组件已启用：第 %s 屏' % '、'.join(str(p) for p in pages))
                 sent = 0
-                interval = self._config.get('native_interval', 3)
+                interval = self._config.get('native_interval', 1)
                 while not self._stop.is_set():
                     begun = time.monotonic()
                     rows, omitted = self._native_rows()
                     reply = self._write_native(process, {'rows': rows})
+                    if reply is None:
+                        break
                     if reply.get('error'):
+                        if '尚未初始化' not in reply['error']:
+                            raise ValueError('原生组件写入失败：' + reply['error'])
                         # The device rejects frames on a page that has not been initialised;
                         # keep the channel open so it starts working once the user turns there.
                         self._line('这一帧未被接受：%s' % reply['error'])
                         self._event(title='等待切到已选中的界面',
                                     message='当前界面没有原生组件：翻到第 %s 屏后会自动开始显示。'
                                             % '、'.join(str(p) for p in pages))
-                        self._stop.wait(max(0.2, interval - (time.monotonic() - begun)))
+                        self._stop.wait(max(0.05, interval - (time.monotonic() - begun)))
                         continue
                     frame = reply.get('frame') or {}
                     written = frame.get('written', 4)
@@ -618,33 +648,67 @@ class Api:
                                 title='正在同步文字组件',
                                 message=('本轮写入 %d 行 · 已更新 %d 轮' % (written, sent))
                                 + (' · %d 个组件未显示' % len(omitted) if omitted else ' · 请看屏确认。'))
-                    self._stop.wait(max(0.2, interval - (time.monotonic() - begun)))
+                    self._stop.wait(max(0.05, interval - (time.monotonic() - begun)))
             finally:
                 self._native_process = None
                 bridge.native_close(process)
                 self._line('原生组件通道已关闭。')
             self._event(native=False, title='文字同步已停止',
-                        message='键盘保留最后收到的四行文字。', phase='idle')
+                        message='已停止向键盘发送文字。', phase='idle')
         return self._job('native-stream', work)
 
     def _write_native(self, process, payload):
-        """向常驻通道写一行并读回一行应答；超时即视为设备不再应答。"""
+        """Read stdout in a separate thread so a silent child can't hold the job lock."""
+        replies = getattr(process, '_neos75_replies', None)
+        if replies is None:
+            replies = process._neos75_replies = queue.Queue()
+
+            def read_stdout():
+                try:
+                    for row in process.stdout:
+                        replies.put(row)
+                finally:
+                    replies.put(None)
+
+            def read_stderr():
+                for row in process.stderr:
+                    self._line(row)
+
+            threading.Thread(target=read_stdout, daemon=True).start()
+            threading.Thread(target=read_stderr, daemon=True).start()
         line = json.dumps(payload, ensure_ascii=False) + '\n'
-        process.stdin.write(line)
-        process.stdin.flush()
-        deadline = time.monotonic() + 8
-        while True:
-            reply = process.stdout.readline()
-            if not reply:
+        try:
+            process.stdin.write(line)
+            process.stdin.flush()
+        except OSError:
+            raise ValueError('原生组件通道已断开，请重新连接键盘。') from None
+        deadline = time.monotonic() + self._native_reply_timeout
+        key = 'mask' if 'mask' in payload else 'frame'
+        while not self._stop.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError('原生组件没有应答，请检查 USB 连接和原生组件补丁。')
+            try:
+                reply = replies.get(timeout=min(remaining, 0.1))
+            except queue.Empty:
+                continue
+            if reply is None:
                 raise ValueError('原生组件通道已断开，请重新连接键盘。')
             try:
                 value = json.loads(reply)
             except ValueError:
                 self._line(reply.strip())
-                if time.monotonic() > deadline:
-                    raise ValueError('原生组件没有应答。') from None
                 continue
-            return value
+            if isinstance(value, dict) and (value.get(key) or value.get('error')):
+                return value
+        return None
+
+    _native_reply_timeout = 8
+
+    def _knob_result(self):
+        if self._knob_out is None:
+            return None
+        return {k: self._knob_out.get(k) for k in ('config', 'bytes', 'written')}
 
     def _knob_payload(self):
         catalog = self._knob()
@@ -652,7 +716,7 @@ class Api:
                 'actions': catalog.get('actions', []),
                 'note': catalog.get('note', ''),
                 'config': dict(self._config.get('knob') or self._knob_defaults()),
-                'applied': self._knob_out,
+                'applied': self._knob_result(),
                 'factory': self._knob_defaults()}
 
     def knob_refresh(self):
@@ -682,7 +746,8 @@ class Api:
             result = bridge.knob_build(base, target, self._config['knob'])
             self._line('\n'.join(result.get('log') or []))
             self._knob_out = {'folder': str(folder), 'base': str(base), 'target': str(target),
-                              'config': dict(self._config['knob']), 'bytes': target.stat().st_size}
+                              'config': dict(self._config['knob']), 'bytes': target.stat().st_size,
+                              'written': False}
             self._event(title='旋钮配置已生成',
                         message='已经算好六个动作位。点「写入键盘」才会真正擦写固件。',
                         phase='done', progress=100)
@@ -713,8 +778,9 @@ class Api:
             raw = bridge.knob_flash(str(target), yes=True)
             self._line(raw)
             self._knob_out = {'folder': str(folder), 'base': str(base), 'target': str(target),
-                              'config': dict(self._config['knob']), 'bytes': target.stat().st_size}
-            self._event(title='旋钮配置已生效',
+                              'config': dict(self._config['knob']), 'bytes': target.stat().st_size,
+                              'written': True}
+            self._event(title='旋钮配置已写入并回验',
                         message='写入并逐字节回验通过。转一下两个旋钮试试；不满意可以改选另一套再写，或恢复出厂。',
                         phase='done', progress=100)
         return self._job('knob-flash', work)
@@ -738,7 +804,7 @@ class Api:
         with self._mutex:
             if self._state['kind'] == 'native-stream':
                 self._stop.set()
-                self._event(title='正在停止文字同步', message='等待当前帧写入结束。')
+                self._event(title='正在停止文字同步', message='正在关闭文字通道。')
                 return {'ok': True}
             if self._state['kind'] != 'stream':
                 return {'ok': False, 'message': '当前没有组件同步任务。'}
@@ -751,7 +817,8 @@ class Api:
         pages = self._renderer.paginate(ids)
         history = self._renderer.append_history(str(self._dir / 'history'), state)
         theme = self._config.get('theme')
-        frames = [self._renderer.render(state, widgets=page, quality=72, limit=30000,
+        quality, limit = (56, 12000) if self._config.get('color_mode') == 'fast' else (72, 30000)
+        frames = [self._renderer.render(state, widgets=page, quality=quality, limit=limit,
                                         history=history, theme=theme)[0] for page in pages]
         with self._mutex:
             self._preview = ['data:image/jpeg;base64,' + base64.b64encode(frame).decode('ascii') for frame in frames]
@@ -1003,6 +1070,28 @@ def run(smoke=False):
                     result['error'] = 'knob config did not normalise case'
                 if len(api._knob()['actions']) < 26:
                     result['error'] = 'knob action catalog too short'
+                # Exercise both save handlers through the real JS bridge. No device
+                # action buttons are called; this settings directory is temporary.
+                revision = api.snapshot()['revision']
+                window.evaluate_js("""
+                    document.querySelector('#native-pages button[data-page="2"]').click();
+                    document.querySelector('#native-pages button[data-page="5"]').click();
+                    const select = document.getElementById('knob-vol-cw');
+                    select.value = 'next';
+                    select.dispatchEvent(new Event('change'));
+                    true;
+                """)
+                for _ in range(60):
+                    saved = api.bootstrap()['config']
+                    if saved['native_pages'] == [2, 5] and saved['knob']['vol-cw'] == 'next':
+                        break
+                    time.sleep(0.05)
+                else:
+                    result['error'] = 'rapid page/knob choices did not persist'
+                time.sleep(0.8)  # one 700 ms UI polling cycle
+                if (window.evaluate_js("document.getElementById('knob-vol-cw').value") != 'next'
+                        or api.snapshot()['revision'] != revision):
+                    result['error'] = 'polling reverted the knob or a preference regenerated the preview'
         except Exception as exc:
             result['error'] = str(exc)
         finally:

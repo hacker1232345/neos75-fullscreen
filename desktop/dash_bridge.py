@@ -389,13 +389,16 @@ def native_once(rows, mask=None, timeout=20, on_line=None, frames_only=True):
             value = json.loads(line)
         except ValueError:
             continue
+        if not isinstance(value, dict):
+            continue
         if value.get('error'):
             raise DashboardError('原生组件写入失败：%s' % value['error'])
         if value.get('frame'):
             frames += 1
-        elif value.get('mask'):
+        elif isinstance(value.get('mask'), dict) and value['mask'].get('acknowledged') is True \
+                and value['mask'].get('mask') == mask:
             masks += 1
-    if frames_only and not frames:
+    if p.returncode != 0 or (frames_only and not frames) or (mask is not None and not masks):
         raise DashboardError('原生组件没有任何应答：%s' % ((err or '').strip().splitlines() or [''])[-1])
     return {'frames': frames, 'masks': masks, 'displayVerified': False}
 

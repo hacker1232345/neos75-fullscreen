@@ -26,6 +26,19 @@ class PortableSampler(unittest.TestCase):
             self.assertIsInstance(metrics['cpu_load'], (float, int))
             self.assertGreater(metrics['mem_total_gb'], 0)
 
+    def test_native_mask_requires_the_matching_acknowledgement(self):
+        import dash_bridge
+        process = Mock(returncode=0)
+        with patch.object(dash_bridge, 'native_popen', return_value=process):
+            for mask in (None, 2, 16):
+                process.communicate.return_value = (
+                    '' if mask is None else json.dumps({'mask': {'mask': mask, 'acknowledged': True}}), '')
+                if mask != 16:
+                    with self.assertRaises(dash_bridge.DashboardError):
+                        dash_bridge.native_mask(16)
+                else:
+                    self.assertEqual(dash_bridge.native_mask(16)['masks'], 1)
+
 
 class GlassWorkflow(unittest.TestCase):
     def setUp(self):
@@ -140,7 +153,7 @@ class GlassWorkflow(unittest.TestCase):
         # keys keep their defaults because this configuration never set them.
         self.assertEqual({k: saved[k] for k in ('widgets', 'interval')}, desired)
         self.assertEqual(saved['native_pages'], [])
-        self.assertEqual(saved['native_interval'], 3)
+        self.assertEqual(saved['native_interval'], 1)
         for ids in [['wrong'], ['cpu','cpu'], 'cpu']:
             self.assertFalse(other.configure({'widgets': ids})['ok'])
         self.assertTrue(other.configure({'widgets':[]})['ok'])
@@ -263,8 +276,45 @@ class GlassWorkflow(unittest.TestCase):
         for bad in ([0], [7], [1, 1], [-1], ['2'], None if False else [1, 'x']):
             self.assertFalse(self.api.configure(dict(base, native_pages=bad))['ok'], bad)
         self.assertTrue(self.api.configure(dict(base, native_pages=[]))['ok'])
-        for bad in (0, 1, 4, 60, 'x'):
+        for good in (0.5, 1):
+            self.assertTrue(self.api.configure(dict(base, native_interval=good))['ok'], good)
+        for bad in (0, True, 4, 60, 'x'):
             self.assertFalse(self.api.configure(dict(base, native_interval=bad))['ok'], bad)
+
+    def test_preview_does_not_block_local_preferences_or_unpin_the_board(self):
+        self.api.select_page(0)
+        self.api._event(busy=True, kind='preview')
+        cfg = self.api.bootstrap()['config']
+        cfg['native_pages'] = [1, 5]
+        cfg['native_interval'] = 0.5
+        cfg['knob']['vol-cw'] = 'next'
+        self.assertTrue(self.api.configure(cfg)['ok'])
+        self.assertEqual(self.api.snapshot()['displayPage'], 0)
+        self.assertFalse(self.api.configure(dict(cfg, widgets=['cpu']))['ok'])
+        self.api._event(kind='native-stream')
+        self.assertFalse(self.api.configure(dict(cfg, native_pages=[3]))['ok'])
+
+    def test_silent_native_child_releases_the_job_after_timeout(self):
+        import io
+        from types import SimpleNamespace
+        self.assertTrue(self.api.configure({'widgets': ['cpu'], 'native_pages': [5]})['ok'])
+        unblock = threading.Event()
+        self.addCleanup(unblock.set)
+        def silent():
+            if unblock.wait(3):
+                return
+            yield 'stalled'
+        child = SimpleNamespace(stdin=io.StringIO(), stdout=silent(), stderr=iter(()))
+        self.core.dash.return_value.native_popen.return_value = child
+        self.core.dash.return_value.native_close.side_effect = lambda _: unblock.set()
+        self.api._native_reply_timeout = 0.12
+        self.assertTrue(self.api.native_start()['ok'])
+        self.wait()
+        status = self.api.snapshot()['state']
+        self.assertFalse(status['busy'])
+        self.assertFalse(status['native'])
+        self.assertIn('没有应答', status['message'])
+        self.core.dash.return_value.native_close.assert_called_once_with(child)
 
     def test_native_preview_folds_the_selected_widgets_without_usb(self):
         self.assertTrue(self.api.configure({'widgets': ['clock_big', 'cpu', 'mem', 'history_cpu']})['ok'])
