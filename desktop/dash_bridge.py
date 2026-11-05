@@ -412,6 +412,8 @@ def push_popen(mode='loop', on_line=None, **kw):
     return p
 
 # ── 旋钮配置（键盘上方两个旋钮 × 三个动作）────────────────────────
+_KNOB_MOD = None
+
 KNOB_SITES = ('vol-cw', 'vol-ccw', 'vol-press', 'scr-cw', 'scr-ccw', 'scr-press')
 KNOB_LABELS = {
     'vol-cw': '音量旋钮 · 顺时针',
@@ -427,10 +429,33 @@ KNOB_DEFAULTS = {
 }
 
 
+def _knob_module():
+    """在进程内加载 tools/knob_config.py。
+
+    为什么不用子进程：打包成 exe 之后 `_python()` 返回的是 exe 自己，
+    执行 `[exe, 'tools/knob_config.py', '--catalog']` 会被当成程序自身的参数，
+    结果拿不到目录、界面里六个下拉框全是空的。knob_config 是纯 Python 模块
+    （keystone 只是可选加速，缺失时自动查 knob_code.json），进程内加载最稳。
+    """
+    global _KNOB_MOD
+    if _KNOB_MOD is not None:
+        return _KNOB_MOD
+    import importlib.util
+    path = _project() / 'tools' / 'knob_config.py'
+    if not path.is_file():
+        raise DashboardError('找不到 tools/knob_config.py：安装包不完整。')
+    spec = importlib.util.spec_from_file_location('neos75_knob_config', path)
+    if spec is None or spec.loader is None:
+        raise DashboardError('载入 tools/knob_config.py 失败。')
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    _KNOB_MOD = mod
+    return mod
+
+
 def knob_catalog():
-    """26 个内置动作 + 两种翻页，附带中文标签与 HID 码（离线，不需要设备）。"""
-    out = _run([_python(), 'tools/knob_config.py', '--catalog'], timeout=60)
-    data = json.loads(out)
+    """26 个内置动作 + 翻页，附带中文标签与 HID 码（离线，不需要设备）。"""
+    data = {'actions': _knob_module().catalog_json()}
     return {
         'sites': [{'id': s, 'label': KNOB_LABELS[s], 'factory': KNOB_DEFAULTS[s]}
                   for s in KNOB_SITES],
@@ -443,17 +468,39 @@ def knob_read(backup=None):
     """反解一份固件里六个动作位的取值；不传就返回出厂默认。"""
     if not backup:
         return {'config': dict(KNOB_DEFAULTS), 'source': 'factory'}
-    out = _run([_python(), 'tools/knob_config.py', '--read', str(backup)], timeout=60)
-    return {'config': json.loads(out), 'source': str(backup)}
+    mod = _knob_module()
+    try:
+        cfg = mod.read_config(str(backup))
+    except Exception as exc:                # 反解失败不该让整个界面挂掉
+        raise DashboardError('反解这份固件失败：%s' % exc) from None
+    return {'config': cfg, 'source': str(backup)}
 
 
 def knob_build(base, out, config):
     """在 base 上改写六个动作位，产物写到 out（离线，不碰 USB）。"""
-    args = [_python(), 'tools/knob_config.py', '--fw', str(base), '--out', str(out)]
+    mod = _knob_module()
+    cfg = {}
     for site in KNOB_SITES:
-        args += ['--' + site, str(config[site])]
-    text = _run(args, timeout=120)
-    return {'out': str(out), 'log': [ln for ln in text.strip().splitlines() if ln.strip()]}
+        key = str(config.get(site) or KNOB_DEFAULTS[site]).strip().lower()
+        if key not in mod.CATALOG:
+            raise DashboardError('未知动作：%s = %s' % (site, key))
+        cfg[site] = key
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    try:
+        blob = mod.build(str(base), cfg, verbose=False)
+    except Exception as exc:
+        raise DashboardError('生成目标固件失败：%s' % exc) from None
+    Path(out).write_bytes(blob)
+    bad = mod.touched_protected(blob, str(base))
+    if bad:
+        raise DashboardError('生成结果改到了禁区：%s' % [hex(i) for i in bad[:6]])
+    log = []
+    for site in KNOB_SITES:
+        log.append('%-10s %-18s %s'
+                   % (site, mod.SITE_LABELS[site], mod.CATALOG[cfg[site]]['label']))
+    log.append('输出 %s  %d B  md5 %s'
+               % (out, len(blob), __import__('hashlib').md5(blob).hexdigest()))
+    return {'out': str(out), 'log': log}
 
 
 def knob_backup(out=None):
