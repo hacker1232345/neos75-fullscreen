@@ -168,5 +168,45 @@
     "minWidth": 130,
     "minHeight": 56,
     "draw": "draw_uptime"
+  },
+  {
+    "id": "playing",
+    "label": "正在播放",
+    "desc": "系统当前播放的歌名/歌手/进度（SMTC，无播放器时写「未在播放」）",
+    "group": "生活",
+    "default": false,
+    "minWidth": 220,
+    "minHeight": 84,
+    "draw": "draw_playing"
+  },
+  {
+    "id": "calendar",
+    "label": "日历",
+    "desc": "今天几号 + 星期 + 年内第几周",
+    "group": "时间",
+    "default": false,
+    "minWidth": 150,
+    "minHeight": 72,
+    "draw": "draw_calendar"
+  },
+  {
+    "id": "link",
+    "label": "连接",
+    "desc": "连接方式、延迟、丢包",
+    "group": "网络",
+    "default": false,
+    "minWidth": 170,
+    "minHeight": 72,
+    "draw": "draw_link"
+  },
+  {
+    "id": "net_pulse",
+    "label": "网速条",
+    "desc": "下行/上行各一条横向条，300 Mbps 满格，一眼看出有没有在跑",
+    "group": "网络",
+    "default": false,
+    "minWidth": 170,
+    "minHeight": 72,
+    "draw": "draw_net_pulse"
   }
 ]

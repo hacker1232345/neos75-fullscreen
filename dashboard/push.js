@@ -195,6 +195,83 @@ function startSampler(intervalMs, warmup = true) {
   };
 }
 
+// ── 正在播放（SMTC）────────────────────────────────────────────
+// 单独一路进程，而且固定用 powershell.exe（5.1）：
+// Windows.Media.Control 是 WinRT 组件，PowerShell 7 里根本没有这个类型，
+// 而上面的 psExe() 优先选 pwsh。所以这里不跟主采样器共享解释器。
+let _PS51 = null;
+function ps51() {
+  if (_PS51) return _PS51;
+  if (process.env.NEOS75_POWERSHELL51) { _PS51 = process.env.NEOS75_POWERSHELL51; return _PS51; }
+  const { spawnSync } = require('node:child_process');
+  const cand = path.join(process.env.SystemRoot || 'C:\\Windows',
+    'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  try {
+    if (fs.existsSync(cand)) {
+      const r = spawnSync(cand, ['-NoProfile', '-Command', 'exit 0'],
+        { windowsHide: true, stdio: 'ignore', timeout: 15000 });
+      if (!r.error && r.status === 0) { _PS51 = cand; return _PS51; }
+    }
+  } catch { /* 退回裸名 */ }
+  _PS51 = 'powershell';
+  return _PS51;
+}
+
+function startMedia(intervalMs = 2000) {
+  const child = spawn(ps51(),
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
+      path.join(HERE, 'media_state.ps1'), '-IntervalMs', String(Math.max(500, intervalMs))],
+    { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+  let buf = '';
+  let latest = null;
+  let seenAt = 0;
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    buf += chunk;
+    let idx;
+    while ((idx = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, idx).replace(/\r$/, '').replace(/^\uFEFF/, '').trim();
+      buf = buf.slice(idx + 1);
+      if (!line) continue;
+      try {
+        const obj = JSON.parse(line);
+        latest = obj;
+        seenAt = Date.now();
+      } catch { /* 非 JSON 行直接丢 */ }
+    }
+  });
+  child.on('error', () => { /* 拿不到音乐不影响其它字段 */ });
+  return {
+    child,
+    // 超过 30 秒没更新就当作不可用，避免把一首老歌当成「正在播放」。
+    get value() {
+      if (!latest) return null;
+      return Date.now() - seenAt > 30000 ? null : latest;
+    },
+    stop() { try { child.kill(); } catch { /* 已退出 */ } },
+  };
+}
+
+// 把媒体字段并进状态；没装播放器时给 null，render 会写「未在播放」。
+function withMedia(state, media) {
+  state.media = media || null;
+  return state;
+}
+
+// 等第一帧媒体数据（最多 3 秒）：读不到就返回 null，不拖慢推送。
+function waitMedia(media, timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    if (media.value) { resolve(media.value); return; }
+    const t0 = Date.now();
+    const tick = () => {
+      if (media.value) { resolve(media.value); return; }
+      if (Date.now() - t0 >= timeoutMs) { resolve(null); return; }
+      setTimeout(tick, 120);
+    };
+    tick();
+  });
+}
+
 // 一次性采样：spawn 一个带 -Warmup 的 pwsh，取第一行就收工
 async function sampleOnce(intervalMs = 0) {
   const s = startSampler(intervalMs, true);
@@ -370,7 +447,9 @@ function planFor(jpeg) {
 
 async function cmdDry(o) {
   const t0 = Date.now();
-  const state = await sampleOnce(0);
+  const media = startMedia(0);
+  const state = withMedia(await sampleOnce(0), await waitMedia(media));
+  media.stop();
   const msSample = Date.now() - t0;
   const { jpeg, ms: msRender } = renderJpeg(state, o);
   const plan = planFor(jpeg);
@@ -387,7 +466,9 @@ async function cmdDry(o) {
 
 async function cmdOnce(o) {
   const t0 = Date.now();
-  const state = await sampleOnce(0);
+  const media = startMedia(0);
+  const state = withMedia(await sampleOnce(0), await waitMedia(media));
+  media.stop();
   const msSample = Date.now() - t0;
   const { jpeg, ms: msRender } = renderJpeg(state, o);
   const r = await pushJpeg(jpeg, o);
@@ -421,8 +502,9 @@ async function cmdLoop(o) {
   verbose(o, '采样进程已启动（' + psExe() + '，每 ' + Math.max(500, Math.min(interval, 3000)) + 'ms），推送周期 ' + interval + 'ms');
   verbose(o, '⚠ 协议无序列号：同一时刻只允许一个上传者，请确认没有别的推送在跑。');
 
+  const media = startMedia(2000);
   let stop = false;
-  const bye = () => { stop = true; s.stop(); };
+  const bye = () => { stop = true; s.stop(); media.stop(); };
   process.on('SIGINT', bye);
   process.on('SIGTERM', bye);
 
@@ -433,7 +515,7 @@ async function cmdLoop(o) {
     let sampleMs = 0, renderMs = 0, pushMs = 0, framesN = 0, acksN = 0, kb = 0;
     try {
       const ts = Date.now();
-      const state = await s.next(Math.max(20000, interval * 3));
+      const state = withMedia(await s.next(Math.max(20000, interval * 3)), media.value);
       sampleMs = Date.now() - ts;
 
       const tr = Date.now();
@@ -463,6 +545,7 @@ async function cmdLoop(o) {
     if (s.closed && !stop) { verbose(o, '采样进程已结束，停止 loop。'); break; }
   }
   s.stop();
+  media.stop();
   verbose(o, '已停止。成功 ' + ok + ' 轮 / 失败 ' + fail + ' 轮。');
   if (!o.json) console.log('  ⚠ 全程 displayVerified=false —— 原厂协议无最终 ACK，请肉眼看屏确认。');
   return 0;
@@ -506,4 +589,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { parseArgs, startSampler, sampleOnce, renderJpeg, pushJpeg, planFor, probe, findScreen, hidModule, main };
+module.exports = { parseArgs, startSampler, sampleOnce, renderJpeg, pushJpeg, planFor, probe, findScreen, hidModule, main, startMedia, waitMedia, withMedia, ps51 };

@@ -536,5 +536,59 @@ class Polish(unittest.TestCase):
         self.assertEqual(img.size, (W, H))
 
 
+class NewWidgets(unittest.TestCase):
+    """新增部件：正在播放 / 日历 / 网速条 / 连接。"""
+
+    def shot(self, ids, state):
+        return rd.render(state, widgets=ids, quality=72)[1]
+
+    def test_all_four_render_without_data(self):
+        # 数据全缺也不能崩：正在播放写「未在播放」，连接写 n/a。
+        st = {'clock': '01:02:03', 'date': '2026-11-06'}
+        img = self.shot(['playing', 'calendar', 'net_pulse', 'link'], st)
+        self.assertEqual(img.size, (W, H))
+
+    def test_calendar_gets_the_day_of_month(self):
+        # 2026-11-06 要显示 6。按 split() 逐段找数字会把整串漏掉，曾显示成 --。
+        for raw, want in (('2026-11-06', 6), ('2026-11-30', 30), ('2026-12-01', 1)):
+            pieces = raw.split('-')
+            self.assertTrue(pieces[2].isdigit())
+            self.assertEqual(str(int(pieces[2])), str(want))
+            self.assertIn('\u5468', rd.date_label(raw))
+
+    def test_playing_changes_when_music_starts(self):
+        with_music = {'media': {'title': 'T', 'artist': 'A', 'status': 'playing',
+                                'position': 10, 'duration': 200}}
+        a = self.shot(['playing'], with_music)
+        b = self.shot(['playing'], {'media': None})
+        self.assertEqual(a.size, b.size)
+        self.assertNotEqual(a.tobytes(), b.tobytes())
+
+    def test_link_does_not_invent_a_latency(self):
+        # 没测到延迟就是 n/a 且不带单位；0ms 是「测到了，很快」，两者必须能区分。
+        # 直接断语义而不是比像素：只比像素的话，单位串不同就会让这条断言
+        # 在「把 n/a 写成 0」的变异下依然通过，等于没测（踩过）。
+        self.assertEqual(rd.link_label(None, None, True)[:2], ('n/a', ''))
+        self.assertEqual(rd.link_label(0, 0, True)[:2], ('0', 'ms'))
+        self.assertEqual(rd.link_label(9, 0, True)[:2], ('9', 'ms'))
+        # 没有连接信息时也不许编「有线」。
+        self.assertEqual(rd.link_label(None, None, None)[2], 'n/a')
+
+    def test_presets_only_name_real_widgets(self):
+        ids = set(w['id'] for w in rd.REGISTRY)
+        for name, group in rd.PRESETS.items():
+            for wid in group:
+                self.assertIn(wid, ids, 'preset %s has unknown %s' % (name, wid))
+        self.assertIn('desk', rd.PRESETS)
+        self.assertIn('media', rd.PRESETS)
+
+    def test_new_widgets_are_in_the_registry(self):
+        ids = set(w['id'] for w in rd.REGISTRY)
+        for wid in ('playing', 'calendar', 'net_pulse', 'link'):
+            self.assertIn(wid, ids)
+            self.assertIn(wid, rd.WMAP)
+            self.assertIn(rd.WMAP[wid]['draw'], rd.DRAW_FNS)
+
+
 if __name__ == '__main__':
     unittest.main()

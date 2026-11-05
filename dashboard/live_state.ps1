@@ -17,7 +17,7 @@
 # 输出字段（key 固定，缺数据一律 null，不省略）：
 #   clock date uptime cpu_load cpu_freq_ghz mem_pct mem_used_gb mem_total_gb temp_c gpu_pct
 #   disk_free_gb net_down_mbps net_up_mbps bat_pct bat_charging bat_ac vol_pct
-#   top_proc top_proc_pct ip
+#   top_proc top_proc_pct ip ping_ms ping_loss link_wired
 
 param(
     [int]$IntervalMs = 1500,
@@ -54,6 +54,8 @@ $PLAN = @{
     vol  = @{ cad = 8;  phase = 6 }
     freq = @{ cad = 10; phase = 8 }
     ip   = @{ cad = 20; phase = 10 }
+    ping = @{ cad = 4;  phase = 2 }
+    link = @{ cad = 8;  phase = 4 }
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -105,6 +107,7 @@ $cpuName = $null
 $memTotalGb = $null
 $nicName = $null
 $gwIndex = $null
+$gwAddr = $null
 $hasBattery = $false
 $cores = 1
 $baseMhz = $null
@@ -137,6 +140,7 @@ try {
         Sort-Object -Property RouteMetric | Select-Object -First 1
     if ($route) {
         $gwIndex = [int]$route.InterfaceIndex
+        try { if ($route.NextHop) { $gwAddr = [string]$route.NextHop } } catch {}
         $ad = Get-NetAdapter -InterfaceIndex $gwIndex -ErrorAction SilentlyContinue
         if ($ad) { $nicName = $ad.Name }
     }
@@ -241,8 +245,18 @@ function Due([string]$k, [int]$round) {
     if ($round -eq 0 -and $Warmup) { return $true }
     return (($round % $PLAN[$k].cad) -eq $PLAN[$k].phase)
 }
-function Put([string]$k, $v, [int]$round) { $C[$k].v = $v; $C[$k].at = $round }
-function GetC([string]$k) { return $C[$k].v }
+function Put([string]$k, $v, [int]$round) {
+    # 有些字段（ping_ms / ping_loss / link_wired）不属于 PLAN 的采样节奏，
+    # 缓存里原本没有条目；直接取属性会在 null 上报错并被上层 catch 吞掉，
+    # 表现就是「字段永远是 null」。这里自己补建。
+    if (-not $C.ContainsKey($k)) { $C[$k] = @{ v = $null; at = $null } }
+    $C[$k].v = $v
+    $C[$k].at = $round
+}
+function GetC([string]$k) {
+    if (-not $C.ContainsKey($k)) { return $null }
+    return $C[$k].v
+}
 
 # top_proc 的「实时占比」用前后两次累计 CPU 时间做差
 $procPrev = $null
@@ -457,6 +471,57 @@ while ($true) {
     }
     $ip = GetC 'ip'
 
+    # ── 网关延迟：.NET Ping 直连，比 Test-Connection 快一个数量级 ──
+    if (Due 'ping' $round) {
+        $ms = $null
+        $loss = $null
+        try {
+            # 先测公网：本机可能挂着代理 TUN（网关 198.18.x.x 恒 0ms，测不出东西）。
+            $target = '223.5.5.5'
+            $p = New-Object System.Net.NetworkInformation.Ping
+            $n = 3
+            $okN = 0
+            $sum = 0.0
+            for ($i = 0; $i -lt $n; $i++) {
+                try {
+                    $r = $p.Send($target, 1200)
+                    if ($r -and $r.Status -eq 'Success') { $okN++; $sum += $r.RoundtripTime }
+                } catch {}
+            }
+            if ($okN -eq 0 -and $gwAddr) {
+                # 公网不通就退回网关，至少还能看出「链路断没断」。
+                for ($i = 0; $i -lt $n; $i++) {
+                    try {
+                        $r = $p.Send([string]$gwAddr, 1200)
+                        if ($r -and $r.Status -eq 'Success') { $okN++; $sum += $r.RoundtripTime }
+                    } catch {}
+                }
+            }
+            if ($okN -gt 0) { $ms = $sum / $okN }
+            $loss = (($n - $okN) / $n) * 100.0
+        } catch {}
+        Put 'ping_ms' $ms $round
+        Put 'ping_loss' $loss $round
+    }
+    $pingMs = GetC 'ping_ms'
+    $pingLoss = GetC 'ping_loss'
+
+    # ── 键盘连接方式：USB\ 就是有线，BTHLE\ 是蓝牙，都没有就是 2.4G ──
+    if (Due 'link' $round) {
+        $wired = $null
+        try {
+            $ids = @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+                Where-Object { $_.InstanceId -match 'VID_1EA7&PID_4884' } |
+                Select-Object -ExpandProperty InstanceId)
+            if ($ids.Count -gt 0) {
+                $wired = $false
+                foreach ($id in $ids) { if ($id -like 'USB\*') { $wired = $true } }
+            }
+        } catch {}
+        Put 'link_wired' $wired $round
+    }
+    $linkWired = GetC 'link_wired'
+
     # ── 时间相关 ──────────────────────────────────────────────
     $uptime = $null
     if ($bootTime) {
@@ -488,6 +553,9 @@ while ($true) {
         '"vol_pct":' + (N $volPct 0) + ',' +
         '"top_proc":' + (J $topName) + ',' +
         '"top_proc_pct":' + (N $topPct 1) + ',' +
+        '"ping_ms":' + (N $pingMs 0) + ',' +
+        '"ping_loss":' + (N $pingLoss 0) + ',' +
+        '"link_wired":' + (B $linkWired) + ',' +
         '"ip":' + (J $ip) +
         '}'
 

@@ -67,6 +67,44 @@ class Sampler:
         self._collecting = False
         self._closed = False
         self._process = None
+        self._media_process = None
+        self._media = None
+        self._media_at = 0.0
+
+    def _enrich_media(self):
+        """常驻读「正在播放」（SMTC）。
+
+        必须用 Windows PowerShell 5.1：Windows.Media.Control 是 WinRT 组件，
+        PowerShell 7 没有 WinRT 投影，类型根本不存在。读不到就保持 None，
+        界面上写「未在播放」，绝不编造歌名。
+        """
+        if sys.platform != 'win32':
+            return
+        exe = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32' / 'WindowsPowerShell' / 'v1.0' / 'powershell.exe'
+        if not exe.is_file():
+            return
+        command = [str(exe), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+                   '-File', str(core.PROJECT / 'dashboard/media_state.ps1'), '-IntervalMs', '2000']
+        with self._extra_lock:
+            if self._closed:
+                return
+            self._media_process = subprocess.Popen(command, stdout=subprocess.PIPE,
+                                                   stderr=subprocess.DEVNULL,
+                                                   text=True, encoding='utf-8', errors='replace',
+                                                   creationflags=core.NO_WINDOW)
+            process = self._media_process
+        try:
+            for line in process.stdout:
+                try:
+                    value = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                with self._extra_lock:
+                    self._media = value
+                    self._media_at = time.monotonic()
+        finally:
+            process.stdout.close()
+            process.wait()
 
     def _enrich(self):
         """Reuse the existing Windows sensor provider, without a new process per frame."""
@@ -99,6 +137,14 @@ class Sampler:
         with self._extra_lock:
             self._closed = True
             process = self._process
+            media = self._media_process
+        if media and media.poll() is None:
+            media.terminate()
+            try:
+                media.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                media.kill()
+                media.wait()
         if process and process.poll() is None:
             process.terminate()
             try:
@@ -111,6 +157,7 @@ class Sampler:
         if sys.platform == 'win32' and not self._collecting:
             self._collecting = True
             threading.Thread(target=self._enrich, daemon=True).start()
+            threading.Thread(target=self._enrich_media, daemon=True).start()
         now = dt.datetime.now()
         mem = psutil.virtual_memory()
         net, tick = psutil.net_io_counters(), time.monotonic()
@@ -148,6 +195,9 @@ class Sampler:
         with self._extra_lock:
             if time.monotonic() - self._extra.get('_at', 0) < 12:
                 result.update({k: v for k, v in self._extra.items() if k != '_at'})
+            # 30 秒没新数据就当没在播放，避免把一首老歌一直挂在屏幕上。
+            fresh = self._media if time.monotonic() - self._media_at < 30 else None
+        result['media'] = fresh
         return result
 
 

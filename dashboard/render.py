@@ -197,6 +197,10 @@ PRESETS = {
     "network": ["clock_big", "net", "ip", "host", "uptime"],
     "weather": ["weather", "clock_big", "date"],
     "codex": ["codex", "clock_big", "cpu", "mem"],
+    # 桌面常驻用：时间 + 正在播放 + 日历 + 两条资源条，一眼能看全
+    "desk": ["clock_big", "playing", "calendar", "cpu", "mem", "link", "net_pulse", "battery"],
+    # 听歌时用：歌名占一半，剩下留给机器状态
+    "media": ["playing", "clock_big", "calendar", "link", "net_pulse", "cpu"],
 }
 
 
@@ -751,6 +755,126 @@ def draw_codex(d, b, st, ctx):
                              value.get('source', '本地事件') + ' · 无事件不代表完成'], color)
 
 
+def draw_playing(d, b, st, ctx):
+    """正在播放：歌名 + 歌手 + 进度条。没有任何播放器时说明「未在播放」。"""
+    value = st.get('media') or {}
+    if not isinstance(value, dict):
+        value = {}
+    cx, cy, cw, ch = _frame(d, b, '正在播放')
+    title = str(value.get('title') or '').strip()
+    artist = str(value.get('artist') or '').strip()
+    status = str(value.get('status') or 'none').lower()
+    if not title:
+        put(d, (cx + cw / 2, cy + ch / 2), '未在播放', max(10, min(22, int(ch * 0.42))),
+            'bd', NA, anchor='mm')
+        return
+    # 标题占上半，歌手 + 进度占下半。标题可能很长（日文/英文混排），交给 fitw 缩。
+    ts = max(11, min(30, int(ch * 0.34)))
+    ttxt, ts = fitw(title, cw, ts, 'bd', 11)
+    put(d, (cx, cy + ch * 0.26), ttxt, ts, 'bd', ACCENT, anchor='lm')
+    sub = artist or ('播放中' if status == 'playing' else '已暂停')
+    ss = max(9, min(16, int(ch * 0.18)))
+    stxt, ss = fitw(sub, cw, ss, 'reg', 9)
+    put(d, (cx, cy + ch * 0.66), stxt, ss, 'reg', DIM, anchor='lm')
+    pos, dur = value.get('position'), value.get('duration')
+    if isinstance(pos, (int, float)) and isinstance(dur, (int, float)) and dur > 0:
+        frac = max(0.0, min(1.0, float(pos) / float(dur)))
+        bar(d, cx, cy + ch - 5, cw, 4, frac * 100.0,
+            GOOD if status == 'playing' else WARN)
+        left = int(dur - pos)
+        stamp = '%d:%02d / %d:%02d' % (int(pos) // 60, int(pos) % 60,
+                                      int(dur) // 60, int(dur) % 60)
+        cs = max(8, min(11, int(ch * 0.13)))
+        put(d, (cx + cw, cy + ch - 8), stamp, cs, 'mono',
+            GOOD if left > 0 else NA, anchor='rs')
+
+
+def draw_calendar(d, b, st, ctx):
+    """日历：今天几号（大字）+ 星期 + 年内第几周。日期来自 state 的 date/clock。"""
+    cx, cy, cw, ch = _frame(d, b, '日历')
+    label = date_label(st.get('date'))
+    raw = str(st.get('date') or '').strip()
+    day = ''
+    weekday = ''
+    for part in label.split():
+        if part.startswith('周') or part.startswith('星期'):
+            weekday = part
+    # 日期串是 2026-11-06，最后一段才是「几号」；直接按 isdigit 找会把整串
+    # 「2026-11-06」当成候选而全部落空，之前就在界面上显示成两个横杠。
+    pieces = raw.split('-')
+    if len(pieces) >= 3 and pieces[2].isdigit():
+        day = str(int(pieces[2]))
+    ds = max(18, min(64, int(ch * 0.72)))
+    dtxt, ds = fitw(day or '--', cw * 0.5, ds, 'bd', 18)
+    put(d, (cx, cy + ch * 0.5), dtxt, ds, 'bd', ACCENT, anchor='lm')
+    right = cx + cw * 0.52
+    ws = max(10, min(20, int(ch * 0.30)))
+    put(d, (right, cy + ch * 0.32), weekday or 'n/a', ws, 'bd', TXT, anchor='lm')
+    week = ''
+    try:
+        y, m, dnum = (int(x) for x in raw.split('-')[:3])
+        week = '第 %d 周' % dt.date(y, m, dnum).isocalendar()[1]
+    except (ValueError, TypeError):
+        week = ''
+    es = max(8, min(13, int(ch * 0.19)))
+    put(d, (right, cy + ch * 0.72), week or (label if label != 'n/a' else ''), es, 'mono',
+        DIM, anchor='lm')
+
+
+def link_label(ms, loss, wired):
+    """把连接状态算成 (数值, 单位, 副标题, 颜色)。
+
+    纯函数，方便测试：没有延时就是 ("n/a", "", ...)，绝不用 0 冒充。
+    """
+    mode = "有线 USB" if wired is True else ("2.4G 无线" if wired is False else "n/a")
+    if ms is None:
+        value, unit, color = "n/a", "", NA
+    else:
+        value = "%.0f" % float(ms)
+        unit = "ms"
+        color = GOOD if float(ms) < 40 else (WARN if float(ms) < 120 else BAD)
+    if loss is None:
+        sub = mode
+    else:
+        sub = "%s   丢 %d%%" % (mode, int(round(float(loss))))
+    return value, unit, sub, color
+
+
+def draw_link(d, b, st, ctx):
+    """连接方式 + 延迟 + 丢包。
+
+    键盘用 USB 线连着就是「有线」，否则按 2.4G 显示。延迟来自 ping 采样，
+    拿不到就写 n/a，不编造一个好看的数。
+    """
+    _frame(d, b, "连接")
+    value, unit, sub, color = link_label(st.get("ping_ms"), st.get("ping_loss"),
+                                        st.get("link_wired"))
+    _metric(d, b, "", value, unit, color, sub=sub)
+
+
+def draw_net_pulse(d, b, st, ctx):
+    """网速脉冲：下行/上行各一条横向条，用相对刻度（300 Mbps 满格）。
+
+    和 draw_net 的区别：那个只报数字，这个给一眼就能看出「现在有没有在跑」的
+    条形，适合放在小尺寸格子里。
+    """
+    cx, cy, cw, ch = _frame(d, b, '网速')
+    SCALE = 300.0
+    dn = st.get('net_down_mbps')
+    up = st.get('net_up_mbps')
+    half = ch / 2.0
+    for index, (val, tag, color) in enumerate(((dn, '↓', GOOD), (up, '↑', ACCENT))):
+        y = cy + half * (index + 0.5)
+        vs = max(9, min(16, int(half * 0.44)))
+        label = '%s %s' % (tag, num(val, 2))
+        put(d, (cx, y - vs * 0.55), label, vs, 'mono', color, anchor='lm')
+        frac = 0.0
+        if isinstance(val, (int, float)) and val > 0:
+            frac = min(1.0, float(val) / SCALE)
+        bh = max(3, int(half * 0.26))
+        bar(d, cx, y + vs * 0.18, cw, bh, frac * 100.0, color)
+
+
 DRAW_FNS = {
     "draw_weather": draw_weather,
     "draw_codex": draw_codex,
@@ -769,6 +893,10 @@ DRAW_FNS = {
     "draw_ip": draw_ip,
     "draw_top_proc": draw_top_proc,
     "draw_history_cpu": draw_history_cpu,
+    "draw_playing": draw_playing,
+    "draw_calendar": draw_calendar,
+    "draw_net_pulse": draw_net_pulse,
+    "draw_link": draw_link,
 }
 
 
